@@ -1,6 +1,7 @@
 # envs/your_env/server/transitions.py
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +14,7 @@ from ..model import (
     CloseIssueAction,
     CloseReason,
     CommentAction,
-    HiddenGradingTarget,
+    HistoryEntry,
     IssueComment,
     IssueSnapshot,
     IssueStatus,
@@ -47,6 +48,10 @@ class TransitionResult(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _dedupe_keep_order(items: List[str]) -> List[str]:
     seen: Set[str] = set()
     out: List[str] = []
@@ -55,6 +60,24 @@ def _dedupe_keep_order(items: List[str]) -> List[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+def _append_history(
+    state: IssueTriageState,
+    *,
+    action: Action,
+    result: TransitionResult,
+) -> None:
+    state.current_action_history.append(
+        HistoryEntry(
+            step_index=state.step_count,
+            action_type=action.type,
+            action_payload=action.model_dump(),
+            outcome=result.action_effect,
+            success=result.action_valid,
+            timestamp=_now(),
+        )
+    )
 
 
 def _available_labels(state: IssueTriageState) -> List[str]:
@@ -116,7 +139,7 @@ def _ensure_comment(
             comment_id=f"c_{len(state.issue.comments) + 1}",
             author=actor,
             body=body,
-            created_at="",
+            created_at=_now(),
             internal=internal,
         )
     )
@@ -125,7 +148,7 @@ def _ensure_comment(
             event_id=f"t_{len(state.issue.timeline) + 1}",
             event_type="commented",
             actor=actor,
-            created_at="",
+            created_at=_now(),
             payload={"internal": str(internal).lower()},
         )
     )
@@ -230,7 +253,6 @@ def _apply_status_label(state: IssueTriageState, label: str) -> None:
 def _update_pending_missing_fields(state: IssueTriageState, requested: List[str]) -> None:
     state.requested_fields = _dedupe_keep_order(state.requested_fields + requested)
     if state.hidden_target and state.hidden_target.required_missing_fields:
-        needed = set(state.hidden_target.required_missing_fields)
         state.pending_missing_fields = [
             f for f in state.hidden_target.required_missing_fields if f not in set(state.requested_fields)
         ]
@@ -418,8 +440,9 @@ def _handle_mark_duplicate(state: IssueTriageState, action: MarkDuplicateAction)
         state.issue.linked_duplicates.append(issue_id)
 
     _set_status_duplicate_label(state)
-    state.public_notes.append(_duplicate_comment_template(state, issue_id))
-    _ensure_comment(state, body=_duplicate_comment_template(state, issue_id), internal=False, actor="triage-agent")
+    duplicate_comment = _duplicate_comment_template(state, issue_id)
+    state.public_notes.append(duplicate_comment)
+    _ensure_comment(state, body=duplicate_comment, internal=False, actor="triage-agent")
 
     changed = ["issue.linked_duplicates", "issue.labels", "issue.comments", "public_notes"]
 
@@ -429,8 +452,10 @@ def _handle_mark_duplicate(state: IssueTriageState, action: MarkDuplicateAction)
     if should_close:
         state.issue.status = IssueStatus.CLOSED
         _mark_close_reason(state, "duplicate")
-        _ensure_comment(state, body=_close_comment_template(state, "duplicate"), internal=False, actor="triage-agent")
-        changed.extend(["issue.status", "issue.metadata", "issue.comments"])
+        close_comment = _close_comment_template(state, "duplicate")
+        _ensure_comment(state, body=close_comment, internal=False, actor="triage-agent")
+        state.public_notes.append(close_comment)
+        changed.extend(["issue.status", "issue.metadata", "issue.comments", "public_notes"])
 
     return TransitionResult(
         action_valid=True,
@@ -445,7 +470,6 @@ def _handle_close_issue(state: IssueTriageState, action: CloseIssueAction) -> Tr
 
     closure_policy = {x.lower() for x in state.repo_rules.closure_policy}
     if closure_policy and reason not in closure_policy and not state.repo_rules.strict_mode:
-        # In relaxed mode, allow closure even if not in policy.
         pass
     elif closure_policy and reason not in closure_policy:
         return TransitionResult(
@@ -511,10 +535,8 @@ def apply_action_to_state(state: IssueTriageState, action: Action) -> Transition
     - close / reopen
     - comment + request-info behavior
     - read actions as no-op responses
+    - action history logging
     """
-    # Keep state-level validity in sync so reward can see it.
-    result: TransitionResult
-
     if action.type == ActionType.READ_ISSUE:
         result = _handle_read_action("issue_read")
     elif action.type == ActionType.READ_REPO_RULES:
@@ -561,4 +583,6 @@ def apply_action_to_state(state: IssueTriageState, action: Action) -> Transition
 
     state.last_action_valid = result.action_valid
     state.last_action_message = result.action_effect
+
+    _append_history(state, action=action, result=result)
     return result
