@@ -11,9 +11,19 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None  # type: ignore[assignment]
+
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Load environment variables from project/local .env files if available.
+if load_dotenv is not None:
+    load_dotenv(dotenv_path=ROOT / ".env")
+    load_dotenv()
 
 try:
     from envs.GitHubIssueTriageManager.server.environment import GitHubIssueTriageEnvironment

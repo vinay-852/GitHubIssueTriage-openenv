@@ -1,0 +1,7 @@
+openenv-core
+fastapi
+uvicorn
+pydantic
+openai
+numpy
+python-dotenv

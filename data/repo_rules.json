@@ -1,0 +1,62 @@
+{
+  "repo_id": "acme-platform",
+  "repo_name": "Acme Platform",
+  "source_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
+  "source_kind": "json",
+  "version": "v1",
+  "strict_mode": true,
+  "labels": {
+    "type": ["type:bug", "type:feature", "type:docs", "type:question"],
+    "severity": ["severity:low", "severity:medium", "severity:high", "severity:critical"],
+    "component": ["component:ui", "component:api", "component:auth", "component:infra", "component:docs"],
+    "status": ["status:needs-info", "status:duplicate", "status:triaged"],
+    "priority": ["priority:p0", "priority:p1", "priority:p2", "priority:p3"]
+  },
+  "severity_policy": {
+    "low": "minor issue with workaround",
+    "medium": "impacts some users",
+    "high": "major functional impact",
+    "critical": "outage, data loss, or security issue"
+  },
+  "priority_policy": {
+    "p0": "critical production blocker",
+    "p1": "high priority bug affecting many users",
+    "p2": "normal issue",
+    "p3": "low priority cleanup or enhancement"
+  },
+  "routing_rules": {
+    "ui": ["alice", "maria"],
+    "api": ["devon", "ravi"],
+    "auth": ["nina", "sameer"],
+    "infra": ["ops-bot", "kevin"],
+    "docs": ["tanya"]
+  },
+  "milestones": ["v1.8", "v1.9", "v2.0", "backlog"],
+  "missing_info": {
+    "bug": ["steps_to_reproduce", "expected_behavior", "actual_behavior", "environment"],
+    "api": ["endpoint", "request_payload", "response_payload", "status_code"]
+  },
+  "duplicate_policy": {
+    "action": "mark_duplicate_and_close",
+    "label": "status:duplicate"
+  },
+  "closure_policy": ["duplicate", "invalid", "wontfix", "resolved", "stale", "not_enough_info"],
+  "response_templates": {
+    "missing_info": "Thanks — please provide: {fields}.",
+    "duplicate": "This appears to be a duplicate of #{issue_id}.",
+    "closed": "Closing this issue as {reason}."
+  },
+  "label_definitions": [],
+  "team_routing_rules": [],
+  "assignee_pool": ["alice", "maria", "devon", "ravi", "nina", "sameer", "ops-bot", "kevin", "tanya"],
+  "team_map": {},
+  "required_fields_by_issue_type": {
+    "bug": ["steps_to_reproduce", "expected_behavior", "actual_behavior"],
+    "api": ["endpoint", "request_payload", "status_code"]
+  },
+  "label_aliases": {},
+  "metadata": {
+    "owner": "acme-org",
+    "notes": "Deterministic triage policy for hackathon benchmark"
+  }
+}

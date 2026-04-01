@@ -9,7 +9,6 @@ from ..model import (
     IssueTriageState,
     Observation,
     ResetResult,
-    Reward,
     StatePayload,
     StepInfo,
     StepResult,
@@ -26,7 +25,7 @@ class GitHubIssueTriageEnvironment:
     """
     Thin orchestration environment.
 
-    Heavy logic should live in helper modules:
+    Heavy logic lives in helper modules:
     - loader.py
     - actions.py
     - transitions.py
@@ -44,28 +43,34 @@ class GitHubIssueTriageEnvironment:
         issues_source: Optional[Union[str, Path]] = None,
         data_dir: Optional[Union[str, Path]] = None,
         strict_mode: bool = True,
+        live_github: bool = False,
     ) -> None:
         self.strict_mode = strict_mode
+        self.live_github = live_github
 
         self._episodes_source: list[IssueTriageState] = episodes or []
         self._episode_index: int = -1
         self._state: Optional[IssueTriageState] = None
-        self._last_reward_total: float = 0.0
 
         if not self._episodes_source:
             if data_dir is not None:
-                self._episodes_source = load_episode_bundle_from_paths(data_dir)
+                self._episodes_source = load_episode_bundle_from_paths(
+                    data_dir,
+                    live_github=live_github,
+                )
             elif repo_rules_source and tasks_source and issues_source:
                 self._episodes_source = load_episode_bundle(
                     repo_rules_path=repo_rules_source,
                     tasks_path=tasks_source,
                     issues_path=issues_source,
+                    live_github=live_github,
                 )
 
     def reset(self, task_id: Optional[str] = None) -> Observation:
         if not self._episodes_source:
             raise RuntimeError(
-                "No episodes loaded. Pass episodes=..., data_dir=..., or repo_rules_source/tasks_source/issues_source."
+                "No episodes loaded. Pass episodes=..., data_dir=..., "
+                "or repo_rules_source/tasks_source/issues_source."
             )
 
         if task_id is None:
@@ -97,7 +102,6 @@ class GitHubIssueTriageEnvironment:
         self._state.last_action_message = ""
         self._state.internal_score_cache = None
 
-        self._last_reward_total = 0.0
         return build_observation(self._state)
 
     def step(self, action: Action | dict) -> StepResult:
@@ -120,10 +124,9 @@ class GitHubIssueTriageEnvironment:
             )
 
         parsed_action = parse_action(action)
-
         transition = apply_action_to_state(state, parsed_action)
-        state.step_count += 1
 
+        state.step_count += 1
         if is_episode_done(state):
             state.done = True
 

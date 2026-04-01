@@ -5,8 +5,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Sequence, Union
 from urllib.request import Request, urlopen
 
 from ..model import (
@@ -26,17 +25,12 @@ from ..model import (
 
 JsonLike = Dict[str, Any]
 
-
 _GITHUB_ISSUE_WEB_RE = re.compile(
     r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/(?P<number>\d+)(?:/.*)?$"
 )
 
 _GITHUB_BLOB_RE = re.compile(
     r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/blob/(?P<branch>[^/]+)/(?P<path>.+)$"
-)
-
-_GITHUB_RAW_RE = re.compile(
-    r"^https?://raw\.githubusercontent\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?P<branch>[^/]+)/(?P<path>.+)$"
 )
 
 
@@ -66,8 +60,7 @@ def _load_text_source(source: Union[str, Path]) -> str:
 
 
 def _load_json_source(source: Union[str, Path]) -> Any:
-    text = _load_text_source(source)
-    return json.loads(text)
+    return json.loads(_load_text_source(source))
 
 
 def _unwrap_payload(data: Any, key: str) -> List[Any]:
@@ -256,9 +249,19 @@ def _normalize_issue_snapshot(data: JsonLike) -> IssueSnapshot:
     if isinstance(milestone_value, dict):
         milestone_value = milestone_value.get("title") or milestone_value.get("name")
 
+    repo_value = data.get("repo_id") or data.get("repository_id") or ""
+    if not repo_value:
+        repository = data.get("repository")
+        if isinstance(repository, dict):
+            repo_value = repository.get("full_name") or repository.get("name") or ""
+
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
     return IssueSnapshot(
         issue_id=str(data.get("issue_id") or data.get("number") or data.get("id")),
-        repo_id=str(data.get("repo_id") or data.get("repository_id") or data.get("repository", {}).get("full_name") or data.get("repository", {}).get("name") or ""),
+        repo_id=str(repo_value),
         issue_url=str(issue_url) if issue_url else None,
         title=str(data.get("title") or ""),
         body=str(data.get("body") or ""),
@@ -281,7 +284,7 @@ def _normalize_issue_snapshot(data: JsonLike) -> IssueSnapshot:
         timeline=timeline,
         linked_duplicates=linked_duplicates,
         is_locked=bool(data.get("is_locked", False)),
-        metadata={str(k): str(v) for k, v in (data.get("metadata") or {}).items()} if isinstance(data.get("metadata"), dict) else {},
+        metadata={str(k): str(v) for k, v in metadata.items()},
     )
 
 
@@ -292,7 +295,6 @@ def _fetch_github_issue(issue_url: str) -> JsonLike:
 
     issue_payload = _fetch_json(api_url)
 
-    # Best-effort comments fetch
     comments_url = issue_payload.get("comments_url")
     comments: List[Any] = []
     if comments_url:
@@ -304,7 +306,12 @@ def _fetch_github_issue(issue_url: str) -> JsonLike:
     normalized: JsonLike = dict(issue_payload)
     normalized["issue_url"] = issue_url
     normalized["comments"] = comments if isinstance(comments, list) else []
-    normalized.setdefault("repo_id", issue_payload.get("repository_url") or issue_payload.get("repository", {}).get("full_name") or "")
+    normalized.setdefault(
+        "repo_id",
+        issue_payload.get("repository_url")
+        or (issue_payload.get("repository") or {}).get("full_name")
+        or "",
+    )
     normalized.setdefault("issue_id", issue_payload.get("number") or issue_payload.get("id"))
     normalized.setdefault("author", (issue_payload.get("user") or {}).get("login", "unknown"))
     normalized.setdefault("status", issue_payload.get("state", "open"))
@@ -318,28 +325,26 @@ def _fetch_github_issue(issue_url: str) -> JsonLike:
     return normalized
 
 
-def _load_issue_item(item: Any) -> IssueSnapshot:
+def _load_issue_item(item: Any, *, live_github: bool = False) -> IssueSnapshot:
     if isinstance(item, IssueSnapshot):
         return item.model_copy(deep=True)
 
     if isinstance(item, str):
         if _is_url(item):
-            url = item
-            if _GITHUB_ISSUE_WEB_RE.match(url):
-                return _normalize_issue_snapshot(_fetch_github_issue(url))
+            if live_github and _GITHUB_ISSUE_WEB_RE.match(item):
+                return _normalize_issue_snapshot(_fetch_github_issue(item))
 
-            # If it is a raw JSON URL, try loading and normalizing.
-            data = _load_json_maybe_github(url)
+            data = _load_json_maybe_github(item)
             if isinstance(data, dict):
                 return _normalize_issue_snapshot(data)
-            raise ValueError(f"Issue URL did not resolve to a JSON object: {url}")
+
+            raise ValueError(f"Issue URL did not resolve to a JSON object: {item}")
 
         raise ValueError(f"Unsupported string issue source: {item}")
 
     if isinstance(item, dict):
-        # If it is a GitHub issue web URL embedded in a dict, fetch it.
         issue_url = item.get("issue_url") or item.get("url")
-        if isinstance(issue_url, str) and _GITHUB_ISSUE_WEB_RE.match(issue_url):
+        if live_github and isinstance(issue_url, str) and _GITHUB_ISSUE_WEB_RE.match(issue_url):
             return _normalize_issue_snapshot(_fetch_github_issue(issue_url))
 
         return _normalize_issue_snapshot(item)
@@ -358,25 +363,34 @@ def load_repo_rules(repo_rules_path: Union[str, Path]) -> RepoRules:
 def load_tasks(tasks_path: Union[str, Path]) -> List[TaskSpec]:
     raw = _load_json_maybe_github(tasks_path)
     task_items = _unwrap_payload(raw, "tasks")
-    return [TaskSpec.model_validate(item) for item in task_items if isinstance(item, dict)]
+
+    task_field_names = set(TaskSpec.model_fields.keys())
+    tasks: List[TaskSpec] = []
+
+    for item in task_items:
+        if not isinstance(item, dict):
+            continue
+        task_data = {k: v for k, v in item.items() if k in task_field_names}
+        tasks.append(TaskSpec.model_validate(task_data))
+
+    return tasks
 
 
-def load_issues(issues_path: Union[str, Path]) -> List[IssueSnapshot]:
+def load_issues(issues_path: Union[str, Path], *, live_github: bool = False) -> List[IssueSnapshot]:
     raw = _load_json_maybe_github(issues_path)
 
     if isinstance(raw, list):
-        return [_load_issue_item(item) for item in raw]
+        return [_load_issue_item(item, live_github=live_github) for item in raw]
 
     if isinstance(raw, dict) and "issues" in raw:
         issues_raw = raw["issues"]
         if isinstance(issues_raw, list):
-            return [_load_issue_item(item) for item in issues_raw]
+            return [_load_issue_item(item, live_github=live_github) for item in issues_raw]
         if isinstance(issues_raw, dict):
-            return [_load_issue_item(issues_raw)]
+            return [_load_issue_item(issues_raw, live_github=live_github)]
 
-    # Allow single issue object too.
     if isinstance(raw, dict):
-        return [_load_issue_item(raw)]
+        return [_load_issue_item(raw, live_github=live_github)]
 
     raise ValueError("issues source must be a list, an object with key 'issues', or a single issue object.")
 
@@ -417,6 +431,7 @@ def load_episode_bundle(
     repo_rules_path: Union[str, Path],
     tasks_path: Union[str, Path],
     issues_path: Union[str, Path],
+    live_github: bool = False,
 ) -> List[IssueTriageState]:
     """
     Main loader used by the environment.
@@ -429,17 +444,20 @@ def load_episode_bundle(
     """
     repo_rules = load_repo_rules(repo_rules_path)
     tasks_raw = _load_json_maybe_github(tasks_path)
-    issues = load_issues(issues_path)
+    issues = load_issues(issues_path, live_github=live_github)
     issue_index = _build_issue_index(issues)
 
     task_items = _unwrap_payload(tasks_raw, "tasks")
 
     episodes: List[IssueTriageState] = []
+    task_field_names = set(TaskSpec.model_fields.keys())
+
     for raw_task in task_items:
         if not isinstance(raw_task, dict):
             continue
 
-        task = TaskSpec.model_validate(raw_task)
+        task_data = {k: v for k, v in raw_task.items() if k in task_field_names}
+        task = TaskSpec.model_validate(task_data)
 
         if task.issue_id not in issue_index:
             raise ValueError(
@@ -465,7 +483,11 @@ def load_episode_bundle(
     return episodes
 
 
-def load_episode_bundle_from_paths(data_dir: Union[str, Path]) -> List[IssueTriageState]:
+def load_episode_bundle_from_paths(
+    data_dir: Union[str, Path],
+    *,
+    live_github: bool = False,
+) -> List[IssueTriageState]:
     """
     Convenience helper when your data is stored in a folder like:
       data/
@@ -486,6 +508,7 @@ def load_episode_bundle_from_paths(data_dir: Union[str, Path]) -> List[IssueTria
         repo_rules_path=repo_rules_path,
         tasks_path=tasks_path,
         issues_path=issues_path,
+        live_github=live_github,
     )
 
 
@@ -495,20 +518,20 @@ def load_single_episode(
     task: dict,
     issue: Union[dict, str],
     candidate_duplicates: Optional[List[dict]] = None,
+    live_github: bool = False,
 ) -> IssueTriageState:
     """
     Helper for tests, ad-hoc episodes, or GitHub-URL-backed issue data.
     """
     repo_rules = load_repo_rules(repo_rules_path)
-    task_obj = TaskSpec.model_validate(task)
+    task_field_names = set(TaskSpec.model_fields.keys())
+    task_data = {k: v for k, v in task.items() if k in task_field_names}
+    task_obj = TaskSpec.model_validate(task_data)
 
-    if isinstance(issue, str):
-        issue_obj = _load_issue_item(issue)
-    else:
-        issue_obj = _load_issue_item(issue)
+    issue_obj = _load_issue_item(issue, live_github=live_github)
 
     dup_objs = [DuplicateCandidate.model_validate(x) for x in (candidate_duplicates or [])]
-    hidden_target = _parse_hidden_target(task) if isinstance(task, dict) else None
+    hidden_target = _parse_hidden_target(task)
 
     return build_initial_state(
         episode_id=str(task.get("episode_id") or f"ep_{task_obj.task_id}"),

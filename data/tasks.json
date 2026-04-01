@@ -1,0 +1,153 @@
+{
+  "tasks": [
+    {
+      "episode_id": "ep_easy_001",
+      "task_id": "easy_001",
+      "difficulty": "easy",
+      "goal_type": "triage_only",
+      "repo_id": "acme-platform",
+      "issue_id": "issue_001",
+      "max_steps": 8,
+      "success_criteria": ["type", "component", "assignee", "priority"],
+      "allowed_actions": [
+        "read_issue",
+        "read_repo_rules",
+        "read_label_definitions",
+        "read_team_routing",
+        "read_assignee_pool",
+        "read_milestones",
+        "add_label",
+        "assign_user",
+        "set_priority",
+        "comment"
+      ],
+      "hidden_grading_flags": {
+        "strict_labels": true
+      },
+      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
+      "hidden_target": {
+        "gold_labels": ["type:bug", "component:api", "severity:high"],
+        "gold_assignee": "devon",
+        "gold_priority": "p1",
+        "gold_milestone": "v1.9",
+        "gold_severity": "high",
+        "gold_component": "api",
+        "gold_duplicate_issue_id": null,
+        "gold_close_reason": null,
+        "required_missing_fields": [],
+        "expected_requests": [],
+        "expected_comment_keywords": ["triaged"],
+        "expected_response_style": "short"
+      },
+      "candidate_duplicates": []
+    },
+    {
+      "episode_id": "ep_medium_001",
+      "task_id": "medium_001",
+      "difficulty": "medium",
+      "goal_type": "needs_info",
+      "repo_id": "acme-platform",
+      "issue_id": "issue_002",
+      "max_steps": 8,
+      "success_criteria": ["type", "component", "request_info"],
+      "allowed_actions": [
+        "read_issue",
+        "read_repo_rules",
+        "read_label_definitions",
+        "read_team_routing",
+        "read_assignee_pool",
+        "read_milestones",
+        "add_label",
+        "assign_user",
+        "set_priority",
+        "comment",
+        "request_info"
+      ],
+      "hidden_grading_flags": {
+        "must_request_missing_info": true
+      },
+      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
+      "hidden_target": {
+        "gold_labels": ["type:bug", "component:auth", "status:needs-info"],
+        "gold_assignee": null,
+        "gold_priority": "p2",
+        "gold_milestone": null,
+        "gold_severity": "medium",
+        "gold_component": "auth",
+        "gold_duplicate_issue_id": null,
+        "gold_close_reason": null,
+        "required_missing_fields": ["steps_to_reproduce", "expected_behavior", "actual_behavior"],
+        "expected_requests": ["steps_to_reproduce", "expected_behavior", "actual_behavior"],
+        "expected_comment_keywords": ["please provide"],
+        "expected_response_style": "request_info"
+      },
+      "candidate_duplicates": []
+    },
+    {
+      "episode_id": "ep_hard_001",
+      "task_id": "hard_001",
+      "difficulty": "hard",
+      "goal_type": "duplicate_resolution",
+      "repo_id": "acme-platform",
+      "issue_id": "issue_003",
+      "max_steps": 10,
+      "success_criteria": ["duplicate", "severity", "milestone", "comment"],
+      "allowed_actions": [
+        "read_issue",
+        "read_repo_rules",
+        "read_label_definitions",
+        "read_team_routing",
+        "read_assignee_pool",
+        "read_milestones",
+        "search_similar_issues",
+        "add_label",
+        "remove_label",
+        "assign_user",
+        "set_priority",
+        "set_milestone",
+        "comment",
+        "mark_duplicate",
+        "close_issue"
+      ],
+      "hidden_grading_flags": {
+        "must_detect_duplicate": true,
+        "must_close_as_duplicate": true
+      },
+      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
+      "hidden_target": {
+        "gold_labels": ["type:bug", "component:ui", "severity:critical", "status:duplicate"],
+        "gold_assignee": null,
+        "gold_priority": "p0",
+        "gold_milestone": "v1.8",
+        "gold_severity": "critical",
+        "gold_component": "ui",
+        "gold_duplicate_issue_id": "issue_099",
+        "gold_close_reason": "duplicate",
+        "required_missing_fields": [],
+        "expected_requests": [],
+        "expected_comment_keywords": ["duplicate", "#issue_099"],
+        "expected_response_style": "duplicate"
+      },
+      "candidate_duplicates": [
+        {
+          "issue_id": "issue_099",
+          "title": "UI crashes when opening settings modal",
+          "short_summary": "Same crash signature, same repro path, canonical issue.",
+          "similarity_score": 0.97,
+          "labels": ["type:bug", "component:ui", "severity:critical"],
+          "status": "open",
+          "reason": "Strong duplicate candidate"
+        },
+        {
+          "issue_id": "issue_088",
+          "title": "Settings modal layout broken on mobile",
+          "short_summary": "Related UI bug but different root cause.",
+          "similarity_score": 0.54,
+          "labels": ["type:bug", "component:ui"],
+          "status": "open",
+          "reason": "Medium similarity only"
+        }
+      ]
+    }
+  ]
+}

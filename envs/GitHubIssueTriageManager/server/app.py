@@ -1,3 +1,4 @@
+# envs/your_env/server/app.py
 from __future__ import annotations
 
 import os
@@ -32,6 +33,7 @@ class ReloadRequest(BaseModel):
     tasks_source: Optional[str] = None
     issues_source: Optional[str] = None
     strict_mode: Optional[bool] = None
+    live_github: Optional[bool] = None
 
 
 class HealthResponse(BaseModel):
@@ -93,6 +95,7 @@ def _build_environment(
     tasks_source: Optional[str] = None,
     issues_source: Optional[str] = None,
     strict_mode: Optional[bool] = None,
+    live_github: Optional[bool] = None,
 ) -> GitHubIssueTriageEnvironment:
     """
     Build one environment instance from either:
@@ -102,6 +105,9 @@ def _build_environment(
     """
     if strict_mode is None:
         strict_mode = _env_bool("STRICT_MODE", True)
+
+    if live_github is None:
+        live_github = _env_bool("LIVE_GITHUB", False)
 
     if data_dir is None:
         data_dir = os.getenv("DATA_DIR") or os.getenv("TRIAGE_DATA_DIR") or _default_data_dir()
@@ -119,6 +125,7 @@ def _build_environment(
         return GitHubIssueTriageEnvironment(
             data_dir=data_dir,
             strict_mode=strict_mode,
+            live_github=live_github,
         )
 
     any_sources = any([repo_rules_source, tasks_source, issues_source])
@@ -135,12 +142,13 @@ def _build_environment(
             tasks_source=tasks_source,
             issues_source=issues_source,
             strict_mode=strict_mode,
+            live_github=live_github,
         )
 
-    # Empty environment is allowed to boot the server, but reset() will fail until data is configured.
     return GitHubIssueTriageEnvironment(
         episodes=[],
         strict_mode=strict_mode,
+        live_github=live_github,
     )
 
 
@@ -253,6 +261,7 @@ def reload_environment(request: Optional[ReloadRequest] = Body(default=None)) ->
                 tasks_source=request.tasks_source if request else None,
                 issues_source=request.issues_source if request else None,
                 strict_mode=request.strict_mode if request else None,
+                live_github=request.live_github if request else None,
             )
             SERVER_STATE.init_error = None
         except Exception as exc:
