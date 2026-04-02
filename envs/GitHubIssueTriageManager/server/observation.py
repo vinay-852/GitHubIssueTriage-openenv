@@ -62,6 +62,46 @@ def _available_milestones(state: IssueTriageState) -> List[str]:
     return deduped
 
 
+def _objective_summary(state: IssueTriageState) -> List[str]:
+    target = state.hidden_target
+    if target is None:
+        return []
+
+    summary: List[str] = []
+
+    missing_labels = [
+        label for label in target.gold_labels if label not in state.issue.labels
+    ]
+    if missing_labels:
+        summary.append(f"Labels needed: {', '.join(missing_labels)}")
+
+    if target.gold_duplicate_issue_id and target.gold_duplicate_issue_id not in state.issue.linked_duplicates:
+        summary.append(f"Link duplicate: {target.gold_duplicate_issue_id}")
+
+    if state.pending_missing_fields:
+        summary.append(f"Request info fields: {', '.join(state.pending_missing_fields)}")
+
+    ordering = {
+        "Labels needed": 3,
+        "Link duplicate": 2,
+        "Request info fields": 1,
+    }
+    summary.sort(key=lambda item: ordering.get(item.split(":")[0], 0), reverse=True)
+    return summary
+
+
+def _progress_metrics(state: IssueTriageState) -> dict:
+    return {
+        "labels_covered": round(state.labels_covered, 4),
+        "routing_covered": round(state.routing_covered, 4),
+        "info_fields_covered": round(state.info_fields_covered, 4),
+        "duplicate_handled": round(state.duplicate_handled, 4),
+        "closure_valid": round(state.closure_valid, 4),
+        "comment_quality": round(state.comment_quality, 4),
+        "step_efficiency": round(state.step_efficiency, 4),
+    }
+
+
 def build_observation(state: IssueTriageState) -> Observation:
     """
     Convert internal episode state into the agent-facing observation.
@@ -81,6 +121,8 @@ def build_observation(state: IssueTriageState) -> Observation:
         candidate_duplicates=[cand.model_copy(deep=True) for cand in state.candidate_duplicates],
         action_history=[entry.model_copy(deep=True) for entry in state.current_action_history],
         pending_missing_fields=list(state.pending_missing_fields),
+        objective_summary=_objective_summary(state),
+        progress_metrics=_progress_metrics(state),
         remaining_steps=remaining_steps,
         step_count=state.step_count,
         done=state.done,

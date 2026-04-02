@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 load_dotenv()
 
 API_KEY = os.getenv("OPENAI_API_KEY")
-BASE_URL = os.getenv("OPENAI_BASE_URL")
+BASE_URL = os.getenv("API_BASE_URL")
 
 
 class LLMAction(BaseModel):
@@ -169,7 +169,7 @@ class IssueTriageAgent:
                     parts.append(delta)
 
             raw_text = "".join(parts).strip()
-            print(f"LLM Raw Stream Output: {raw_text}")
+            print(f"[Debug]LLM Raw Stream Output: {raw_text}")
 
             return self._parse_action_json(raw_text)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union, Annotated
+from typing import Any, Dict, Iterable, List, Literal, Optional, Union, Annotated, Tuple
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -267,6 +267,17 @@ class IssueTriageState(BaseModel):
     last_action_valid: bool = True
     last_action_message: str = ""
 
+    labels_covered: float = 0.0
+    routing_covered: float = 0.0
+    info_fields_covered: float = 0.0
+    duplicate_handled: float = 0.0
+    closure_valid: float = 0.0
+    comment_quality: float = 0.0
+    step_efficiency: float = 1.0
+    progress_metrics: Dict[str, float] = Field(default_factory=dict)
+    consecutive_read_actions: int = 0
+    assignee_change_count: int = 0
+
     metadata: Dict[str, str] = Field(default_factory=dict)
 
 
@@ -394,6 +405,87 @@ class NoopAction(BaseModel):
     type: Literal[ActionType.NOOP] = ActionType.NOOP
 
 
+ACTION_PAYLOAD_RULES: Dict[ActionType, Dict[str, bool]] = {
+    ActionType.READ_ISSUE: {"requires_issue_id": True},
+    ActionType.ADD_LABEL: {"requires_label": True},
+    ActionType.REMOVE_LABEL: {"requires_label": True},
+    ActionType.ASSIGN_USER: {"requires_username": True},
+    ActionType.SET_MILESTONE: {"requires_milestone": True},
+    ActionType.COMMENT: {"requires_text": True},
+    ActionType.REQUEST_INFO: {"requires_fields": True},
+    ActionType.MARK_DUPLICATE: {"requires_issue_id": True},
+}
+
+
+def _is_non_empty(value: Optional[str]) -> bool:
+    return bool(value and value.strip())
+
+
+def action_requires_issue_id(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_issue_id", False)
+
+
+def action_requires_label(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_label", False)
+
+
+def action_requires_username(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_username", False)
+
+
+def action_requires_milestone(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_milestone", False)
+
+
+def action_requires_text(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_text", False)
+
+
+def action_requires_fields(action_type: ActionType) -> bool:
+    return ACTION_PAYLOAD_RULES.get(action_type, {}).get("requires_fields", False)
+
+
+def validate_action_payload(action: "Action") -> Tuple[bool, str]:
+    """
+    Perform additional validation that goes beyond schema-level checks.
+    Returns (is_valid, message). Message is empty when valid.
+    """
+    action_type = action.type
+
+    if action_requires_issue_id(action_type):
+        issue_id = getattr(action, "issue_id", None)
+        if not _is_non_empty(issue_id):
+            return False, "Issue ID is required for this action."
+
+    if action_requires_label(action_type):
+        label_value = getattr(action, "label", None)
+        if not _is_non_empty(label_value):
+            return False, "Label value cannot be empty."
+
+    if action_requires_username(action_type):
+        username_value = getattr(action, "username", None)
+        if not _is_non_empty(username_value):
+            return False, "Assignee username cannot be empty."
+
+    if action_requires_milestone(action_type):
+        milestone_value = getattr(action, "milestone", None)
+        if not _is_non_empty(milestone_value):
+            return False, "Milestone cannot be empty."
+
+    if action_requires_text(action_type):
+        text_value = getattr(action, "text", None)
+        if not _is_non_empty(text_value):
+            return False, "Comment text cannot be empty."
+
+    if action_requires_fields(action_type):
+        fields_value: Iterable[str] = getattr(action, "fields", [])
+        trimmed = [f.strip() for f in fields_value if isinstance(f, str) and f.strip()]
+        if not trimmed:
+            return False, "Request info action requires at least one non-empty field."
+
+    return True, ""
+
+
 Action = Annotated[
     Union[
         ReadIssueAction,
@@ -436,6 +528,8 @@ class Observation(BaseModel):
     candidate_duplicates: List[DuplicateCandidate] = Field(default_factory=list)
     action_history: List[HistoryEntry] = Field(default_factory=list)
     pending_missing_fields: List[str] = Field(default_factory=list)
+    objective_summary: List[str] = Field(default_factory=list)
+    progress_metrics: Dict[str, float] = Field(default_factory=dict)
     remaining_steps: int = 0
     step_count: int = 0
     done: bool = False
@@ -457,8 +551,13 @@ class Reward(BaseModel):
     duplicate_score: float = Field(default=0.0, ge=0.0, le=1.0)
     closure_score: float = Field(default=0.0, ge=0.0, le=1.0)
     comment_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    step_efficiency_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    bundle_bonus: float = Field(default=0.0, ge=0.0)
+    redundant_action_penalty: float = Field(default=0.0, le=0.0)
+    step_penalty: float = Field(default=0.0, le=0.0)
     invalid_action_penalty: float = Field(default=0.0, le=0.0)
     destructive_action_penalty: float = Field(default=0.0, le=0.0)
+    components: Dict[str, float] = Field(default_factory=dict)
 
 
 class StepInfo(BaseModel):
@@ -468,7 +567,9 @@ class StepInfo(BaseModel):
     action_effect: str = ""
     changed_fields: List[str] = Field(default_factory=list)
     reward_breakdown: Dict[str, float] = Field(default_factory=dict)
+    reward_components: Dict[str, float] = Field(default_factory=dict)
     grader_notes: List[str] = Field(default_factory=list)
+    progress_metrics: Dict[str, float] = Field(default_factory=dict)
 
 
 class StepResult(BaseModel):

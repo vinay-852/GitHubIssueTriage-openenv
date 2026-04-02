@@ -1,14 +1,14 @@
 {
   "tasks": [
     {
-      "episode_id": "ep_easy_001",
-      "task_id": "easy_001",
+      "episode_id": "ep_easy_routing",
+      "task_id": "triage_easy_api_p1",
       "difficulty": "easy",
       "goal_type": "triage_only",
       "repo_id": "acme-platform",
       "issue_id": "issue_001",
       "max_steps": 8,
-      "success_criteria": ["type", "component", "assignee", "priority"],
+      "success_criteria": ["labels", "assignee", "priority", "milestone"],
       "allowed_actions": [
         "read_issue",
         "read_repo_rules",
@@ -19,18 +19,18 @@
         "add_label",
         "assign_user",
         "set_priority",
+        "set_milestone",
         "comment"
       ],
       "hidden_grading_flags": {
         "strict_labels": true
       },
-      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
       "hidden_target": {
-        "gold_labels": ["type:bug", "component:api", "severity:high"],
+        "gold_labels": ["type:bug", "component:api", "severity:critical", "status:triaged"],
         "gold_assignee": "devon",
-        "gold_priority": "p1",
+        "gold_priority": "p0",
         "gold_milestone": "v1.9",
-        "gold_severity": "high",
+        "gold_severity": "critical",
         "gold_component": "api",
         "gold_duplicate_issue_id": null,
         "gold_close_reason": null,
@@ -42,14 +42,14 @@
       "candidate_duplicates": []
     },
     {
-      "episode_id": "ep_medium_001",
-      "task_id": "medium_001",
+      "episode_id": "ep_medium_needs_info",
+      "task_id": "needs_info_sso",
       "difficulty": "medium",
       "goal_type": "needs_info",
       "repo_id": "acme-platform",
       "issue_id": "issue_002",
-      "max_steps": 8,
-      "success_criteria": ["type", "component", "request_info"],
+      "max_steps": 10,
+      "success_criteria": ["request_info", "labels", "status"],
       "allowed_actions": [
         "read_issue",
         "read_repo_rules",
@@ -58,15 +58,12 @@
         "read_assignee_pool",
         "read_milestones",
         "add_label",
-        "assign_user",
-        "set_priority",
         "comment",
         "request_info"
       ],
       "hidden_grading_flags": {
         "must_request_missing_info": true
       },
-      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
       "hidden_target": {
         "gold_labels": ["type:bug", "component:auth", "status:needs-info"],
         "gold_assignee": null,
@@ -76,22 +73,22 @@
         "gold_component": "auth",
         "gold_duplicate_issue_id": null,
         "gold_close_reason": null,
-        "required_missing_fields": ["steps_to_reproduce", "expected_behavior", "actual_behavior"],
-        "expected_requests": ["steps_to_reproduce", "expected_behavior", "actual_behavior"],
+        "required_missing_fields": ["steps_to_reproduce", "expected_behavior", "actual_behavior", "environment"],
+        "expected_requests": ["steps_to_reproduce", "expected_behavior", "actual_behavior", "environment"],
         "expected_comment_keywords": ["please provide"],
         "expected_response_style": "request_info"
       },
       "candidate_duplicates": []
     },
     {
-      "episode_id": "ep_hard_001",
-      "task_id": "hard_001",
+      "episode_id": "ep_hard_duplicate_resolution",
+      "task_id": "duplicate_ui_crash",
       "difficulty": "hard",
       "goal_type": "duplicate_resolution",
       "repo_id": "acme-platform",
       "issue_id": "issue_003",
       "max_steps": 10,
-      "success_criteria": ["duplicate", "severity", "milestone", "comment"],
+      "success_criteria": ["duplicate", "close", "labels"],
       "allowed_actions": [
         "read_issue",
         "read_repo_rules",
@@ -102,7 +99,6 @@
         "search_similar_issues",
         "add_label",
         "remove_label",
-        "assign_user",
         "set_priority",
         "set_milestone",
         "comment",
@@ -113,7 +109,6 @@
         "must_detect_duplicate": true,
         "must_close_as_duplicate": true
       },
-      "repo_rules_url": "https://github.com/acme-org/acme-platform/blob/main/repo_rules.json",
       "hidden_target": {
         "gold_labels": ["type:bug", "component:ui", "severity:critical", "status:duplicate"],
         "gold_assignee": null,
@@ -131,21 +126,21 @@
       "candidate_duplicates": [
         {
           "issue_id": "issue_099",
-          "title": "UI crashes when opening settings modal",
-          "short_summary": "Same crash signature, same repro path, canonical issue.",
+          "title": "Canonical crash when opening settings modal",
+          "short_summary": "Known regression with identical stack trace and repro steps.",
           "similarity_score": 0.97,
           "labels": ["type:bug", "component:ui", "severity:critical"],
           "status": "open",
-          "reason": "Strong duplicate candidate"
+          "reason": "Matches crash signature and device matrix."
         },
         {
           "issue_id": "issue_088",
           "title": "Settings modal layout broken on mobile",
-          "short_summary": "Related UI bug but different root cause.",
+          "short_summary": "Visual bug with similar context but different root cause.",
           "similarity_score": 0.54,
           "labels": ["type:bug", "component:ui"],
           "status": "open",
-          "reason": "Medium similarity only"
+          "reason": "Related but lower similarity."
         }
       ]
     }

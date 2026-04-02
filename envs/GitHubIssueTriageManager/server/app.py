@@ -17,6 +17,8 @@ class ResetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: Optional[str] = None
+    difficulty: Optional[str] = None
+    seed: Optional[int] = None
 
 
 class StepRequest(BaseModel):
@@ -276,7 +278,11 @@ def reset(request: Optional[ResetRequest] = Body(default=None)) -> Observation:
     env = _get_env()
     with SERVER_STATE.lock:
         try:
-            return env.reset(task_id=request.task_id if request else None)
+            return env.reset(
+                task_id=request.task_id if request else None,
+                difficulty=request.difficulty if request else None,
+                seed=request.seed if request else None,
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

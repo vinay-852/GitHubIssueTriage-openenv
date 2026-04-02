@@ -1,3 +1,5 @@
 openenv-course/
 .env
+.codex
+.trial.py
 __pycache__

@@ -1,11 +1,15 @@
 # envs/your_env/server/environment.py
 from __future__ import annotations
 
+import random
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 from ..model import (
     Action,
+    Difficulty,
+    HistoryEntry,
     IssueTriageState,
     Observation,
     ResetResult,
@@ -13,7 +17,7 @@ from ..model import (
     StepInfo,
     StepResult,
 )
-from .actions import parse_action
+from .actions import ParsedActionResult, parse_and_validate_action
 from .loader import load_episode_bundle, load_episode_bundle_from_paths
 from .observation import build_observation
 from .reward import compute_reward
@@ -40,6 +44,11 @@ class GitHubIssueTriageEnvironment:
         self._episodes_source: list[IssueTriageState] = episodes or []
         self._episode_index: int = -1
         self._state: Optional[IssueTriageState] = None
+        self._seed: Optional[int] = None
+        self._global_sequence: List[int] = []
+        self._global_position: int = -1
+        self._difficulty_sequences: Dict[Difficulty, List[int]] = {}
+        self._difficulty_positions: Dict[Difficulty, int] = {}
 
         if not self._episodes_source:
             if data_dir is not None:
@@ -55,16 +64,111 @@ class GitHubIssueTriageEnvironment:
                     live_github=live_github,
                 )
 
-    def reset(self, task_id: Optional[str] = None) -> Observation:
+        self._initialize_sequences()
+
+    def _initialize_sequences(self, seed: Optional[int] = None) -> None:
+        if not self._episodes_source:
+            self._global_sequence = []
+            self._global_position = -1
+            self._difficulty_sequences = {}
+            self._difficulty_positions = {}
+            return
+
+        rng = random.Random(seed) if seed is not None else None
+
+        indices = list(range(len(self._episodes_source)))
+        if rng is not None:
+            rng.shuffle(indices)
+
+        self._global_sequence = indices
+        self._global_position = -1
+
+        self._difficulty_sequences = {}
+        self._difficulty_positions = {}
+        for difficulty in Difficulty:
+            seq = [idx for idx in indices if self._episodes_source[idx].task.difficulty == difficulty]
+            if rng is not None:
+                rng.shuffle(seq)
+            self._difficulty_sequences[difficulty] = seq
+            self._difficulty_positions[difficulty] = -1
+
+    def _set_seed(self, seed: Optional[int]) -> None:
+        self._seed = seed
+        self._initialize_sequences(seed)
+
+    @staticmethod
+    def _timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    def _record_history(
+        self,
+        state: IssueTriageState,
+        *,
+        action: Action,
+        outcome: str,
+        success: bool,
+    ) -> None:
+        state.current_action_history.append(
+            HistoryEntry(
+                step_index=state.step_count,
+                action_type=action.type,
+                action_payload=action.model_dump(),
+                outcome=outcome,
+                success=success,
+                timestamp=self._timestamp(),
+            )
+        )
+
+    def _normalize_difficulty(
+        self, difficulty: Optional[Union[str, Difficulty]]
+    ) -> Optional[Difficulty]:
+        if difficulty is None:
+            return None
+        if isinstance(difficulty, Difficulty):
+            return difficulty
+        try:
+            return Difficulty(difficulty.strip().lower())
+        except Exception as exc:
+            raise KeyError(f"Unknown difficulty: {difficulty}") from exc
+
+    def _next_index(self, *, difficulty: Optional[Difficulty] = None) -> int:
+        if difficulty is None:
+            if not self._global_sequence:
+                raise RuntimeError("No episodes available.")
+            self._global_position = (self._global_position + 1) % len(self._global_sequence)
+            return self._global_sequence[self._global_position]
+
+        seq = self._difficulty_sequences.get(difficulty, [])
+        if not seq:
+            raise KeyError(f"No episodes available for difficulty '{difficulty.value}'.")
+        position = (self._difficulty_positions[difficulty] + 1) % len(seq)
+        self._difficulty_positions[difficulty] = position
+        return seq[position]
+
+    def reset(
+        self,
+        task_id: Optional[str] = None,
+        difficulty: Optional[Union[str, Difficulty]] = None,
+        seed: Optional[int] = None,
+    ) -> Observation:
         if not self._episodes_source:
             raise RuntimeError(
                 "No episodes loaded. Pass episodes=..., data_dir=..., "
                 "or repo_rules_source/tasks_source/issues_source."
             )
 
+        if seed is not None:
+            self._set_seed(seed)
+
+        difficulty_enum = self._normalize_difficulty(difficulty)
+
         if task_id is None:
-            self._episode_index = (self._episode_index + 1) % len(self._episodes_source)
-            base_state = self._episodes_source[self._episode_index]
+            if difficulty_enum is None:
+                index = self._next_index()
+            else:
+                index = self._next_index(difficulty=difficulty_enum)
+            self._episode_index = index
+            base_state = self._episodes_source[index]
         else:
             match_idx = None
             for idx, ep in enumerate(self._episodes_source):
@@ -99,6 +203,14 @@ class GitHubIssueTriageEnvironment:
         if state.done:
             obs = build_observation(state)
             reward = compute_reward(state)
+            reward_dump = reward.model_dump()
+            reward_components = reward_dump.pop("components", {}) if isinstance(reward_dump.get("components"), dict) else {}
+            reward_breakdown = {
+                key: float(value)
+                for key, value in reward_dump.items()
+                if isinstance(value, (int, float))
+            }
+
             return StepResult(
                 observation=obs,
                 reward=reward,
@@ -107,12 +219,56 @@ class GitHubIssueTriageEnvironment:
                     action_valid=False,
                     action_effect="episode_already_done",
                     changed_fields=[],
-                    reward_breakdown=reward.model_dump(),
+                    reward_breakdown=reward_breakdown,
+                    reward_components=reward_components,
                     grader_notes=["Episode already completed."],
                 ),
             )
 
-        parsed_action = parse_action(action)
+        validation: ParsedActionResult = parse_and_validate_action(action, state.task.allowed_actions)
+        parsed_action = validation.action
+
+        if not validation.valid:
+            action_effect = validation.effect or "action_validation_failed"
+            notes = validation.notes or ["Action failed validation."]
+
+            self._record_history(state, action=parsed_action, outcome=action_effect, success=False)
+
+            state.step_count += 1
+            if is_episode_done(state):
+                state.done = True
+
+            state.last_action_valid = False
+            state.last_action_message = notes[0]
+
+            reward = compute_reward(state)
+            obs = build_observation(state)
+            state.internal_score_cache = reward.total
+
+            reward_dump = reward.model_dump()
+            reward_components = reward_dump.pop("components", {}) if isinstance(reward_dump.get("components"), dict) else {}
+            reward_breakdown = {
+                key: float(value)
+                for key, value in reward_dump.items()
+                if isinstance(value, (int, float))
+            }
+
+            info = StepInfo(
+                action_valid=False,
+                action_effect=action_effect,
+                changed_fields=[],
+                reward_breakdown=reward_breakdown,
+                reward_components=reward_components,
+                grader_notes=notes,
+            )
+
+            return StepResult(
+                observation=obs,
+                reward=reward,
+                done=state.done,
+                info=info,
+            )
+
         transition = apply_action_to_state(state, parsed_action)
 
         state.step_count += 1
@@ -122,16 +278,28 @@ class GitHubIssueTriageEnvironment:
         reward = compute_reward(state)
         obs = build_observation(state)
 
+        transition_notes = list(getattr(transition, "notes", []))
+        transition_effect = str(getattr(transition, "action_effect", ""))
+
         state.internal_score_cache = reward.total
         state.last_action_valid = bool(getattr(transition, "action_valid", True))
-        state.last_action_message = str(getattr(transition, "action_effect", ""))
+        state.last_action_message = transition_notes[0] if transition_notes else transition_effect
+
+        reward_dump = reward.model_dump()
+        reward_components = reward_dump.pop("components", {}) if isinstance(reward_dump.get("components"), dict) else {}
+        reward_breakdown = {
+            key: float(value)
+            for key, value in reward_dump.items()
+            if isinstance(value, (int, float))
+        }
 
         info = StepInfo(
             action_valid=bool(getattr(transition, "action_valid", True)),
-            action_effect=str(getattr(transition, "action_effect", "")),
+            action_effect=transition_effect,
             changed_fields=list(getattr(transition, "changed_fields", [])),
-            reward_breakdown=reward.model_dump(),
-            grader_notes=list(getattr(transition, "notes", [])),
+            reward_breakdown=reward_breakdown,
+            reward_components=reward_components,
+            grader_notes=transition_notes,
         )
 
         return StepResult(
@@ -147,8 +315,13 @@ class GitHubIssueTriageEnvironment:
     def snapshot(self) -> StatePayload:
         return StatePayload(state=self.state())
 
-    def reset_result(self, task_id: Optional[str] = None) -> ResetResult:
-        obs = self.reset(task_id=task_id)
+    def reset_result(
+        self,
+        task_id: Optional[str] = None,
+        difficulty: Optional[Union[str, Difficulty]] = None,
+        seed: Optional[int] = None,
+    ) -> ResetResult:
+        obs = self.reset(task_id=task_id, difficulty=difficulty, seed=seed)
         return ResetResult(observation=obs, state=self.state())
 
     def _require_state(self) -> IssueTriageState:
