@@ -22,17 +22,6 @@ from .transitions import apply_action_to_state
 
 
 class GitHubIssueTriageEnvironment:
-    """
-    Thin orchestration environment.
-
-    Heavy logic lives in helper modules:
-    - loader.py
-    - actions.py
-    - transitions.py
-    - observation.py
-    - reward.py
-    - termination.py
-    """
 
     def __init__(
         self,

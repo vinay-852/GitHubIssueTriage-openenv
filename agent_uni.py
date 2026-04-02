@@ -10,9 +10,6 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 load_dotenv()
 
-API_KEY = os.getenv("OPENAI_API_KEY")
-BASE_URL = os.getenv("OPENAI_BASE_URL")
-
 
 class LLMAction(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -56,17 +53,20 @@ class LLMAction(BaseModel):
 
         data = dict(data)
 
+        # Accept multiple model output styles.
         if "type" not in data:
             if "action" in data:
                 data["type"] = data.pop("action")
             elif "action_type" in data:
                 data["type"] = data.pop("action_type")
 
+        # Flatten nested payloads.
         payload = data.pop("action_payload", None)
         if isinstance(payload, dict):
             for k, v in payload.items():
                 data.setdefault(k, v)
 
+        # Drop common non-schema leakage.
         for k in ["outcome", "success", "timestamp", "step_index"]:
             data.pop(k, None)
 
@@ -114,9 +114,13 @@ Reasoning rules:
 
 class IssueTriageAgent:
     def __init__(self) -> None:
-        self.api_base_url = BASE_URL
-        self.api_key = API_KEY 
-        self.model_name = os.getenv("MODEL_NAME", "oca/gpt5")
+        self.api_base_url = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+        self.api_key = (
+            os.getenv("HF_TOKEN")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("API_KEY")
+        )
+        self.model_name = os.getenv("MODEL_NAME")
 
         self.temperature = float(os.getenv("TEMPERATURE", "0.2"))
         self.max_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "200"))
@@ -126,55 +130,42 @@ class IssueTriageAgent:
         print(f"Using API key: {'Yes' if self.api_key else 'No'}")
 
         if not self.api_key:
-            raise RuntimeError("Missing API_KEY / HF_TOKEN / OPENAI_API_KEY.")
+            raise RuntimeError("Missing HF_TOKEN / OPENAI_API_KEY / API_KEY.")
+        if not self.model_name:
+            raise RuntimeError("Missing MODEL_NAME.")
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
 
-    def _build_messages(self, observation: Dict[str, Any]) -> List[Dict[str, str]]:
-        return [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "instruction": "Choose the next best triage action.",
-                        "observation": observation,
-                    },
-                    indent=2,
-                ),
-            },
-        ]
-
-    def _parse_action_json(self, raw_text: str) -> Dict[str, Any]:
-        raw_text = raw_text.strip()
-        action = LLMAction.model_validate_json(raw_text)
-        payload = action.model_dump(exclude_none=True)
-        return payload if "type" in payload else {"type": "noop"}
-
     def next_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            stream = self.client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model_name,
-                messages=self._build_messages(observation),
-                stream=True,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "instruction": "Choose the next best triage action.",
+                                "observation": observation,
+                            },
+                            indent=2,
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
             )
 
-            parts: List[str] = []
+            content = response.choices[0].message.content or "{}"
+            print(f"LLM Raw Output: {content}")
 
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    parts.append(delta)
-
-            raw_text = "".join(parts).strip()
-            print(f"LLM Raw Stream Output: {raw_text}")
-
-            return self._parse_action_json(raw_text)
+            action = LLMAction.model_validate_json(content)
+            payload = action.model_dump(exclude_none=True)
+            return payload if "type" in payload else self._fallback()
 
         except Exception as e:
-            print(f"Error occurred in next_action_streaming: {e}")
+            print(f"Error occurred: {e}")
             return self._fallback()
 
     def _fallback(self) -> Dict[str, Any]:
