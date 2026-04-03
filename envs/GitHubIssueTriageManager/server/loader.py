@@ -127,6 +127,69 @@ def _load_json_maybe_github(source: Union[str, Path]) -> Any:
 
     return _fetch_json(url)
 
+def load_episode_from_source(
+    *,
+    repo_rules_path: Union[str, Path],
+    issue_source: Union[str, Path, Dict[str, Any]],
+    live_github: bool = False,
+    task_id: Optional[str] = None,
+    max_steps: int = 10,
+) -> IssueTriageState:
+    repo_rules = load_repo_rules(repo_rules_path)
+
+    # issue_source can be:
+    # - GitHub issue URL string
+    # - local JSON path
+    # - dict
+    if isinstance(issue_source, dict):
+        issue = _normalize_issue_snapshot(issue_source)
+    else:
+        issue = _load_issue_item(issue_source, live_github=live_github)
+
+    generated_task_id = task_id or f"triage_{issue.repo_id.replace('/', '_')}_{issue.issue_id}"
+
+    task = TaskSpec(
+        task_id=generated_task_id,
+        difficulty=Difficulty.EASY,
+        goal_type=GoalType.TRIAGE_ONLY,
+        repo_id=issue.repo_id,
+        issue_id=issue.issue_id,
+        max_steps=max_steps,
+        success_criteria=[],
+        allowed_actions=[
+            ActionType.READ_ISSUE,
+            ActionType.READ_REPO_RULES,
+            ActionType.READ_LABEL_DEFINITIONS,
+            ActionType.READ_TEAM_ROUTING,
+            ActionType.READ_ASSIGNEE_POOL,
+            ActionType.READ_MILESTONES,
+            ActionType.SEARCH_SIMILAR_ISSUES,
+            ActionType.ADD_LABEL,
+            ActionType.REMOVE_LABEL,
+            ActionType.ASSIGN_USER,
+            ActionType.SET_PRIORITY,
+            ActionType.SET_MILESTONE,
+            ActionType.COMMENT,
+            ActionType.REQUEST_INFO,
+            ActionType.PROVIDE_INFO,
+            ActionType.MARK_DUPLICATE,
+            ActionType.CLOSE_ISSUE,
+            ActionType.REOPEN_ISSUE,
+            ActionType.NOOP,
+        ],
+        hidden_grading_flags={},
+        repo_rules_url=None,
+    )
+
+    hidden_target = None  # Optional: fill later if you want scoring
+    return build_initial_state(
+        episode_id=f"ep_{generated_task_id}",
+        task=task,
+        repo_rules=repo_rules,
+        issue=issue,
+        candidate_duplicates=[],
+        hidden_target=hidden_target,
+    )
 
 def _parse_issue_comments(raw_comments: Any) -> List[IssueComment]:
     comments: List[IssueComment] = []

@@ -1,9 +1,7 @@
 # envs/your_env/server/termination.py
 from __future__ import annotations
 
-from typing import Set
-
-from  ..models  import IssueStatus, IssueTriageState
+from ..models import IssueStatus, IssueTriageState
 
 
 def _all_required_labels_present(state: IssueTriageState) -> bool:
@@ -67,7 +65,9 @@ def _missing_info_ok(state: IssueTriageState) -> bool:
 
 def _closure_ok(state: IssueTriageState) -> bool:
     target = state.hidden_target
-    if target is None or target.gold_close_reason is None:
+    if target is None:
+        return True
+    if target.gold_close_reason is None:
         return state.issue.status == IssueStatus.OPEN
     return state.issue.status == IssueStatus.CLOSED
 
@@ -76,8 +76,12 @@ def _task_goal_satisfied(state: IssueTriageState) -> bool:
     """
     Final success condition for the episode.
 
-    This is intentionally deterministic and based on the hidden target.
+    If no hidden target exists, this should not auto-solve the episode.
+    That keeps live URL/local runs active until max_steps or explicit done.
     """
+    if state.hidden_target is None:
+        return False
+
     return all(
         [
             _all_required_labels_present(state),
