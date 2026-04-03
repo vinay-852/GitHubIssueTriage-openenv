@@ -1,4 +1,3 @@
-# envs/your_env/server/loader.py
 from __future__ import annotations
 
 import json
@@ -8,8 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 from urllib.request import Request, urlopen
 
-from  ..models  import (
+from ..models import (
+    ActionType,
+    Difficulty,
     DuplicateCandidate,
+    GoalType,
     HiddenGradingTarget,
     IssueComment,
     IssueSnapshot,
@@ -127,69 +129,6 @@ def _load_json_maybe_github(source: Union[str, Path]) -> Any:
 
     return _fetch_json(url)
 
-def load_episode_from_source(
-    *,
-    repo_rules_path: Union[str, Path],
-    issue_source: Union[str, Path, Dict[str, Any]],
-    live_github: bool = False,
-    task_id: Optional[str] = None,
-    max_steps: int = 10,
-) -> IssueTriageState:
-    repo_rules = load_repo_rules(repo_rules_path)
-
-    # issue_source can be:
-    # - GitHub issue URL string
-    # - local JSON path
-    # - dict
-    if isinstance(issue_source, dict):
-        issue = _normalize_issue_snapshot(issue_source)
-    else:
-        issue = _load_issue_item(issue_source, live_github=live_github)
-
-    generated_task_id = task_id or f"triage_{issue.repo_id.replace('/', '_')}_{issue.issue_id}"
-
-    task = TaskSpec(
-        task_id=generated_task_id,
-        difficulty=Difficulty.EASY,
-        goal_type=GoalType.TRIAGE_ONLY,
-        repo_id=issue.repo_id,
-        issue_id=issue.issue_id,
-        max_steps=max_steps,
-        success_criteria=[],
-        allowed_actions=[
-            ActionType.READ_ISSUE,
-            ActionType.READ_REPO_RULES,
-            ActionType.READ_LABEL_DEFINITIONS,
-            ActionType.READ_TEAM_ROUTING,
-            ActionType.READ_ASSIGNEE_POOL,
-            ActionType.READ_MILESTONES,
-            ActionType.SEARCH_SIMILAR_ISSUES,
-            ActionType.ADD_LABEL,
-            ActionType.REMOVE_LABEL,
-            ActionType.ASSIGN_USER,
-            ActionType.SET_PRIORITY,
-            ActionType.SET_MILESTONE,
-            ActionType.COMMENT,
-            ActionType.REQUEST_INFO,
-            ActionType.PROVIDE_INFO,
-            ActionType.MARK_DUPLICATE,
-            ActionType.CLOSE_ISSUE,
-            ActionType.REOPEN_ISSUE,
-            ActionType.NOOP,
-        ],
-        hidden_grading_flags={},
-        repo_rules_url=None,
-    )
-
-    hidden_target = None  # Optional: fill later if you want scoring
-    return build_initial_state(
-        episode_id=f"ep_{generated_task_id}",
-        task=task,
-        repo_rules=repo_rules,
-        issue=issue,
-        candidate_duplicates=[],
-        hidden_target=hidden_target,
-    )
 
 def _parse_issue_comments(raw_comments: Any) -> List[IssueComment]:
     comments: List[IssueComment] = []
@@ -489,6 +428,67 @@ def _parse_candidate_duplicates(raw_task: dict) -> List[DuplicateCandidate]:
     return candidates
 
 
+def _generate_hidden_target_from_issue(issue: IssueSnapshot) -> HiddenGradingTarget:
+    """
+    Auto-generate a HiddenGradingTarget from issue metadata and comments.
+    
+    This extracts:
+      - gold_labels: from issue.labels and inferred from priority/severity/component
+      - gold_priority: from issue.priority or extracted from comments
+      - gold_severity: from issue.severity
+      - gold_component: from issue.component
+      - gold_assignee: from first assignee if available
+    """
+    gold_labels: List[str] = []
+    
+    # Extract explicit labels from the issue
+    if issue.labels:
+        gold_labels.extend(issue.labels)
+    
+    # Infer labels from scalar fields
+    if issue.priority:
+        gold_labels.append(f"priority:{issue.priority.value}")
+    
+    if issue.severity:
+        gold_labels.append(f"severity:{issue.severity.value}")
+    
+    if issue.component:
+        gold_labels.append(f"component:{issue.component}")
+    
+    # Extract priority (can be overridden by comments)
+    gold_priority = issue.priority
+    
+    # Try to extract priority from comments if not already set
+    if not gold_priority and issue.comments:
+        for comment in issue.comments:
+            # Look for priority mentions in comment body
+            comment_lower = comment.body.lower()
+            for priority in Priority:
+                if priority.value in comment_lower:
+                    gold_priority = priority
+                    break
+            if gold_priority:
+                break
+    
+    # Extract first assignee if available
+    gold_assignee = issue.assignees[0] if issue.assignees else None
+    
+    return HiddenGradingTarget(
+        gold_labels=gold_labels,
+        gold_assignee=gold_assignee,
+        gold_priority=gold_priority,
+        gold_milestone=issue.milestone,
+        gold_severity=issue.severity,
+        gold_component=issue.component,
+        gold_duplicate_issue_id=issue.linked_duplicates[0] if issue.linked_duplicates else None,
+        gold_close_reason=None,
+        required_missing_fields=[],
+        expected_requests=[],
+        expected_comment_keywords=[],
+        expected_response_style=None,
+    )
+
+
 def load_episode_bundle(
     *,
     repo_rules_path: Union[str, Path],
@@ -602,5 +602,72 @@ def load_single_episode(
         repo_rules=repo_rules,
         issue=issue_obj,
         candidate_duplicates=dup_objs,
+        hidden_target=hidden_target,
+    )
+
+
+def load_episode_from_source(
+    *,
+    repo_rules_path: Union[str, Path],
+    issue_source: Union[str, Path, Dict[str, Any]],
+    live_github: bool = False,
+    task_id: Optional[str] = None,
+    max_steps: int = 10,
+) -> IssueTriageState:
+    """
+    Build a single episode directly from repo rules + one issue source.
+    This is the no-tasks.json path.
+    """
+    repo_rules = load_repo_rules(repo_rules_path)
+
+    if isinstance(issue_source, dict):
+        issue = _normalize_issue_snapshot(issue_source)
+    else:
+        issue = _load_issue_item(issue_source, live_github=live_github)
+
+    generated_task_id = task_id or f"triage_{issue.repo_id.replace('/', '_')}_{issue.issue_id}"
+
+    task = TaskSpec(
+        task_id=generated_task_id,
+        difficulty=Difficulty.EASY,
+        goal_type=GoalType.TRIAGE_ONLY,
+        repo_id=issue.repo_id,
+        issue_id=issue.issue_id,
+        max_steps=max_steps,
+        success_criteria=[],
+        allowed_actions=[
+            ActionType.READ_ISSUE,
+            ActionType.READ_REPO_RULES,
+            ActionType.READ_LABEL_DEFINITIONS,
+            ActionType.READ_TEAM_ROUTING,
+            ActionType.READ_ASSIGNEE_POOL,
+            ActionType.READ_MILESTONES,
+            ActionType.SEARCH_SIMILAR_ISSUES,
+            ActionType.ADD_LABEL,
+            ActionType.REMOVE_LABEL,
+            ActionType.ASSIGN_USER,
+            ActionType.SET_PRIORITY,
+            ActionType.SET_MILESTONE,
+            ActionType.COMMENT,
+            ActionType.REQUEST_INFO,
+            ActionType.PROVIDE_INFO,
+            ActionType.MARK_DUPLICATE,
+            ActionType.CLOSE_ISSUE,
+            ActionType.REOPEN_ISSUE,
+            ActionType.NOOP,
+        ],
+        hidden_grading_flags={},
+        repo_rules_url=None,
+    )
+
+    # Auto-generate hidden target from issue if not explicitly provided
+    hidden_target = _generate_hidden_target_from_issue(issue)
+
+    return build_initial_state(
+        episode_id=f"ep_{generated_task_id}",
+        task=task,
+        repo_rules=repo_rules,
+        issue=issue,
+        candidate_duplicates=[],
         hidden_target=hidden_target,
     )

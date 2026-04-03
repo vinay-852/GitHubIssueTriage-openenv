@@ -1,10 +1,15 @@
-# envs/your_env/server/app.py
 from __future__ import annotations
 
 from openenv.core.env_server import create_fastapi_app
+
+from ..models import Action, Observation
 from .environment import GitHubIssueTriageEnvironment
 
-app = create_fastapi_app(GitHubIssueTriageEnvironment)
+app = create_fastapi_app(
+    GitHubIssueTriageEnvironment,
+    Action,
+    Observation,
+)
 
 if __name__ == "__main__":
     import os

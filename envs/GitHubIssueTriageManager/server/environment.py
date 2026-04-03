@@ -158,8 +158,6 @@ class GitHubIssueTriageEnvironment(Environment):
         difficulty: Optional[Union[str, Difficulty]] = None,
         seed: Optional[int] = None,
     ) -> Observation:
-        if task_id is None:
-            index = self._next_index(difficulty=difficulty_enum) if difficulty_enum else self._next_index()
         if not self._episodes_source:
             raise RuntimeError(
                 "No episodes loaded. Pass episodes=..., data_dir=..., "
@@ -170,7 +168,6 @@ class GitHubIssueTriageEnvironment(Environment):
             self._set_seed(seed)
 
         difficulty_enum = self._normalize_difficulty(difficulty)
-
         if task_id is None:
             if difficulty_enum is None:
                 index = self._next_index()
