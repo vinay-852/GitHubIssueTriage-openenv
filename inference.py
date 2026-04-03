@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from agent import IssueTriageAgent
-from envs.GitHubIssueTriageManager.client import GitHubIssueTriageClient
-from envs.GitHubIssueTriageManager.models import ActionType
+from envs.GitHubIssueTriage.models import ActionType
+from envs.GitHubIssueTriage.server.GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
+from envs.GitHubIssueTriage.server.grader import grade_episode
+from envs.GitHubIssueTriage.server.loader import load_episode_from_source
 
 
-def _structured_print(label: str, payload: Dict[str, Any]) -> None:
+def _structured_print(label: str, payload: Dict) -> None:
     print(f"[{label}] {json.dumps(payload, sort_keys=True)}", flush=True)
 
 
-def _observation_snapshot(observation) -> Dict[str, Any]:
+def _observation_snapshot(observation) -> Dict:
     return {
         "step_count": observation.step_count,
         "remaining_steps": observation.remaining_steps,
@@ -25,6 +27,21 @@ def _observation_snapshot(observation) -> Dict[str, Any]:
         "pending_missing_fields": getattr(observation, "pending_missing_fields", []),
         "provided_fields": getattr(observation, "provided_fields", {}),
     }
+
+
+def _parse_github_issue_url(issue_url: str) -> tuple[str, str]:
+    parsed = urlparse(issue_url)
+    parts = [p for p in parsed.path.split("/") if p]
+
+    if len(parts) < 4 or parts[2] != "issues":
+        raise ValueError(
+            f"Unsupported GitHub issue URL: {issue_url}. Expected https://github.com/OWNER/REPO/issues/123"
+        )
+
+    owner = parts[0]
+    repo = parts[1]
+    issue_id = parts[3]
+    return f"{owner}/{repo}", issue_id
 
 
 def _collect_provided_info(fields: List[str]) -> Dict[str, str]:
@@ -39,15 +56,18 @@ def _collect_provided_info(fields: List[str]) -> Dict[str, str]:
     return values
 
 
-def _build_provide_info_action(fields: List[str]) -> Dict[str, Any]:
+def _build_provide_info_action(fields: List[str]) -> Dict[str, object]:
     return {
         "type": ActionType.PROVIDE_INFO.value,
         "fields": _collect_provided_info(fields),
     }
 
 
-def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dict[str, float]:
-    observation = client.reset()
+def run_episode(
+    env: GitHubIssueTriageEnvironment,
+    agent: IssueTriageAgent,
+) -> Dict[str, float]:
+    observation = env.reset()
 
     _structured_print(
         "START",
@@ -64,7 +84,7 @@ def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dic
 
     while True:
         action = agent.next_action(observation.model_dump())
-        step_result = client.step(action)
+        step_result = env.step(action)
 
         _structured_print(
             "STEP",
@@ -72,8 +92,11 @@ def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dic
                 "task_id": observation.task.task_id,
                 "step": step_index,
                 "action": action,
-                "reward": step_result.reward,
-                "action_valid": step_result.done is not None,
+                "reward": step_result.reward.total,
+                "reward_breakdown": step_result.reward.model_dump(),
+                "action_valid": step_result.info.action_valid,
+                "action_effect": step_result.info.action_effect,
+                "grader_notes": step_result.info.grader_notes,
                 "observation": _observation_snapshot(step_result.observation),
             },
         )
@@ -90,7 +113,7 @@ def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dic
             )
             if requested_fields:
                 provide_action = _build_provide_info_action(list(requested_fields))
-                provide_result = client.step(provide_action)
+                provide_result = env.step(provide_action)
 
                 _structured_print(
                     "STEP",
@@ -98,8 +121,11 @@ def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dic
                         "task_id": observation.task.task_id,
                         "step": step_index,
                         "action": provide_action,
-                        "reward": provide_result.reward,
-                        "action_valid": provide_result.done is not None,
+                        "reward": provide_result.reward.total,
+                        "reward_breakdown": provide_result.reward.model_dump(),
+                        "action_valid": provide_result.info.action_valid,
+                        "action_effect": provide_result.info.action_effect,
+                        "grader_notes": provide_result.info.grader_notes,
                         "observation": _observation_snapshot(provide_result.observation),
                     },
                 )
@@ -110,32 +136,68 @@ def run_episode(client: GitHubIssueTriageClient, agent: IssueTriageAgent) -> Dic
                 if provide_result.done:
                     break
 
-    final_state = client.state()
-    _structured_print(
-        "END",
-        {
-            "task_id": observation.task.task_id,
-            "steps_taken": step_index,
-            "final_episode_id": final_state.episode_id,
-        },
-    )
+    final_state = env.state
+    grade = grade_episode(final_state)
 
-    return {"steps": float(step_index)}
+    result_payload = {
+        "task_id": observation.task.task_id,
+        "steps_taken": step_index,
+        "score": grade.score,
+        "matched_labels": grade.matched_labels,
+        "matched_assignee": grade.matched_assignee,
+        "matched_priority": grade.matched_priority,
+        "matched_milestone": grade.matched_milestone,
+        "duplicate_matched": grade.duplicate_matched,
+        "missing_fields_requested": grade.missing_fields_requested,
+        "closed_correctly": grade.closed_correctly,
+        "comment_accepted": grade.comment_accepted,
+        "notes": grade.notes,
+    }
+    _structured_print("END", result_payload)
+
+    return {"score": grade.score, "steps": float(step_index)}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run triage against a Docker endpoint.")
-    parser.add_argument(
-        "--base-url",
-        default=os.getenv("OPENENV_BASE_URL", "http://localhost:8000"),
-        help="OpenEnv server base URL (Docker endpoint).",
-    )
+    parser = argparse.ArgumentParser(description="Run triage from a GitHub issue URL or local issue JSON.")
+    parser.add_argument("--repo-rules", required=True, help="Path to repo_rules.json")
+    parser.add_argument("--issue-url", help="GitHub issue URL")
+    parser.add_argument("--issue-file", help="Path to local issue JSON file")
+    parser.add_argument("--live-github", action="store_true", help="Fetch issue data directly from GitHub")
+    parser.add_argument("--max-steps", type=int, default=10, help="Max steps for the generated episode")
+    parser.add_argument("--task-id", default=None, help="Optional override for generated task id")
     args = parser.parse_args()
 
-    client = GitHubIssueTriageClient(base_url=args.base_url)
+    if bool(args.issue_url) == bool(args.issue_file):
+        raise ValueError("Provide exactly one of --issue-url or --issue-file.")
+
+    repo_rules_path = Path(args.repo_rules).resolve()
+    if not repo_rules_path.exists():
+        raise FileNotFoundError(f"Repo rules file not found: {repo_rules_path}")
+
+    if args.issue_url:
+        issue_source = args.issue_url
+    else:
+        issue_source = Path(args.issue_file).resolve()
+        if not issue_source.exists():
+            raise FileNotFoundError(f"Issue file not found: {issue_source}")
+
+    episode = load_episode_from_source(
+        repo_rules_path=repo_rules_path,
+        issue_source=issue_source,
+        live_github=args.live_github,
+        task_id=args.task_id,
+        max_steps=args.max_steps,
+    )
+
+    env = GitHubIssueTriageEnvironment(
+        episodes=[episode],
+        strict_mode=True,
+        live_github=args.live_github,
+    )
     agent = IssueTriageAgent()
 
-    run_episode(client, agent)
+    run_episode(env, agent)
 
 
 if __name__ == "__main__":

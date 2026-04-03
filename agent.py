@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import TypeAdapter, ValidationError
 
-from envs.GitHubIssueTriageManager.models import Action, ActionType
+from envs.GitHubIssueTriage.models import Action, ActionType
 
 load_dotenv()
 

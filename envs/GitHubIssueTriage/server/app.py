@@ -35,17 +35,15 @@ except Exception as e:  # pragma: no cover
         "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
     ) from e
 
-try:
-    from ..models import Action as Action, Observation as Observation
-    from .GitHubIssueTriage_environment import GithubissuetriageEnvironment
-except ModuleNotFoundError:
-    from models import Action as Action, Observation as Observation
-    from server.GitHubIssueTriage_environment import GithubissuetriageEnvironment
+
+from ..models import Action , Observation
+from .GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
+
 
 
 # Create the app with web interface and README integration
 app = create_app(
-    GithubissuetriageEnvironment,
+    GitHubIssueTriageEnvironment,
     Action,
     Observation,
     env_name="GitHubIssueTriage",
