@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Union
 
 from openenv.core.env_server import Environment
 
-from ..models import (
+from models import (
     Action,
     Difficulty,
     HistoryEntry,
