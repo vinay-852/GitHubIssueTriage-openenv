@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Union
 
 from openenv.core.env_server import Environment
 
-import (
+from .import (
     Action,
     Difficulty,
     HistoryEntry,
@@ -20,12 +20,7 @@ import (
     StepInfo,
     StepResult,
 )
-import ParsedActionResult, parse_and_validate_action
-import load_episode_bundle, load_episode_bundle_from_paths
-import build_observation
-import compute_reward
-import is_episode_done
-import apply_action_to_state
+from . import ParsedActionResult, parse_and_validate_action,load_episode_bundle, load_episode_bundle_from_paths, build_observation, compute_reward, is_episode_done, apply_action_to_state
 
 
 class GitHubIssueTriageEnvironment(Environment):

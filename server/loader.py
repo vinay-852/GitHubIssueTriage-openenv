@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 from urllib.request import Request, urlopen
 
-import (
+from . import (
     ActionType,
     Difficulty,
     DuplicateCandidate,

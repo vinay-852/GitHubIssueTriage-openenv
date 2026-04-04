@@ -1,6 +1,6 @@
 # envs/your_env/server/termination.py
 from __future__ import annotations
-import IssueStatus, IssueTriageState
+from . import IssueStatus, IssueTriageState
 
 
 def _all_required_labels_present(state: IssueTriageState) -> bool:
