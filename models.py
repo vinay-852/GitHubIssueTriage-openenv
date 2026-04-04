@@ -510,7 +510,6 @@ Action = Annotated[
         SetPriorityAction,
         SetMilestoneAction,
         CommentAction,
-        RequestInfoAction,
         MarkDuplicateAction,
         CloseIssueAction,
         ReopenIssueAction,

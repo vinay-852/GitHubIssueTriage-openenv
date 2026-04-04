@@ -229,7 +229,17 @@ class GitHubIssueTriageEnvironment(Environment):
         return build_observation(self._state)
 
     def step(self, action: Action | dict) -> StepResult:
+        """Execute one step of the environment.
+        
+        Args:
+            action: Action instance or dictionary with action data
+            
+        Returns:
+            StepResult with observation, reward, done, and info
+        """
         state = self._require_state()
+        
+        print(f"[STEP_CALLED] action type: {type(action)}, action: {action}", flush=True)
 
         if state.done:
             obs = build_observation(state)
@@ -261,9 +271,19 @@ class GitHubIssueTriageEnvironment(Environment):
                 ),
             )
 
-        validation: ParsedActionResult = parse_and_validate_action(
-            action, state.task.allowed_actions
-        )
+        try:
+            validation: ParsedActionResult = parse_and_validate_action(
+                action, state.task.allowed_actions
+            )
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            error_msg = f"Action parsing failed: {str(e)}"
+            print(f"[SERVER ERROR] {error_msg}", flush=True)
+            print(f"[SERVER TRACEBACK] {error_trace}", flush=True)
+            raise ValueError(error_msg) from e
+
         parsed_action = validation.action
 
         if not validation.valid:

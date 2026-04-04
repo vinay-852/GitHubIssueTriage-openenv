@@ -28,9 +28,21 @@ def parse_action(action: Union[Action, Dict[str, Any]]) -> Action:
     If the action is already a typed Action, it is returned unchanged.
     """
     if isinstance(action, dict):
-        sanitized = _sanitize_raw_action(action)
+        raw_action = action
+    elif hasattr(action, "model_dump"):
+        raw_action = action.model_dump(exclude_none=True, mode="json")
+    else:
+        return ACTION_ADAPTER.validate_python(action)
+
+    sanitized = _sanitize_raw_action(raw_action)
+    try:
         return ACTION_ADAPTER.validate_python(sanitized)
-    return action
+    except Exception as e:
+        # Provide detailed error information
+        import json
+        print(f"[ACTION_PARSE_ERROR] Validation failed for action: {json.dumps(sanitized)}", flush=True)
+        print(f"[ACTION_PARSE_ERROR] Error: {str(e)}", flush=True)
+        raise ValueError(f"Invalid action format: {sanitized}. Error: {str(e)}") from e
 
 
 def get_action_type(action: Union[Action, Dict[str, Any]]) -> ActionType:

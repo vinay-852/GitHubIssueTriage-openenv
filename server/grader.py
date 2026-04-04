@@ -1,7 +1,7 @@
 # envs/your_env/server/grader.py
 from __future__ import annotations
 
-from typing import List, Set
+from typing import Any, List, Set
 
 try:
     from GitHubIssueTriage.models import GraderResult, HiddenGradingTarget, IssueStatus, IssueTriageState
@@ -136,12 +136,30 @@ def _grade_comment(state: IssueTriageState, target: HiddenGradingTarget) -> tupl
     return ok, notes
 
 
-def grade_episode(state: IssueTriageState) -> GraderResult:
+def grade_episode(state: IssueTriageState | Any) -> GraderResult:
     """
     Deterministic grader for a completed or in-progress episode.
 
     Score range: 0.0 to 1.0
     """
+    # Some wrappers pass a state provider (e.g. env.state method) instead of the state object.
+    if callable(state):
+        state = state()
+
+    if not hasattr(state, "hidden_target") or not hasattr(state, "issue"):
+        return GraderResult(
+            score=0.0,
+            matched_labels=[],
+            matched_assignee=False,
+            matched_priority=False,
+            matched_milestone=False,
+            duplicate_matched=False,
+            missing_fields_requested=False,
+            closed_correctly=False,
+            comment_accepted=False,
+            notes=["Invalid state object passed to grader."],
+        )
+
     target = state.hidden_target
     if target is None:
         # Fallback grading when no hidden target exists.

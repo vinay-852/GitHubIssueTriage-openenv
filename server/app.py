@@ -36,11 +36,19 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 
+from pydantic import BaseModel, ConfigDict
+
+
+class ActionPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    type: str
+
+
 try:
-    from GitHubIssueTriage.models import Action, Observation
+    from GitHubIssueTriage.models import Observation
     from GitHubIssueTriage.server.GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
 except ImportError:  # pragma: no cover
-    from models import Action, Observation
+    from models import Observation
     from server.GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
 
 
@@ -48,11 +56,48 @@ except ImportError:  # pragma: no cover
 # Create the app with web interface and README integration
 app = create_app(
     GitHubIssueTriageEnvironment,
-    Action,
+    ActionPayload,
     Observation,
     env_name="GitHubIssueTriage",
     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
 )
+
+
+# Add custom error handler for validation errors
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import json
+import traceback
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """Custom handler to provide detailed validation error messages."""
+    error_msg = str(exc)
+    error_details = exc.errors()
+    print(f"[VALIDATION_ERROR] {error_msg}", flush=True)
+    print(f"[VALIDATION_DETAILS] {json.dumps(error_details, default=str)}", flush=True)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": error_details,
+            "message": f"Validation error: {error_msg}",
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Custom handler to log all unhandled exceptions."""
+    error_trace = traceback.format_exc()
+    print(f"[UNHANDLED_ERROR] {str(exc)}", flush=True)
+    print(f"[TRACEBACK] {error_trace}", flush=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "message": str(exc),
+            "type": type(exc).__name__,
+        }
+    )
 
 
 def main(host: str = "0.0.0.0", port: int = 8000):
