@@ -3,15 +3,26 @@ from __future__ import annotations
 
 from typing import List, Optional, Set
 
-from . import (
-    CloseReason,
-    HiddenGradingTarget,
-    IssueStatus,
-    IssueTriageState,
-    Priority,
-    Reward,
-    Severity,
-)
+try:
+    from GitHubIssueTriage.models import (
+        CloseReason,
+        HiddenGradingTarget,
+        IssueStatus,
+        IssueTriageState,
+        Priority,
+        Reward,
+        Severity,
+    )
+except ImportError:  # pragma: no cover
+    from models import (
+        CloseReason,
+        HiddenGradingTarget,
+        IssueStatus,
+        IssueTriageState,
+        Priority,
+        Reward,
+        Severity,
+    )
 
 
 def _labels_set(state: IssueTriageState) -> Set[str]:

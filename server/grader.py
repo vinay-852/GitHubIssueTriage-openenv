@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import List, Set
 
-from . import GraderResult, HiddenGradingTarget, IssueStatus, IssueTriageState
+try:
+    from GitHubIssueTriage.models import GraderResult, HiddenGradingTarget, IssueStatus, IssueTriageState
+except ImportError:  # pragma: no cover
+    from models import GraderResult, HiddenGradingTarget, IssueStatus, IssueTriageState
 
 
 def _labels_set(state: IssueTriageState) -> Set[str]:

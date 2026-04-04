@@ -12,7 +12,10 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from . import Action, Observation
+try:
+    from GitHubIssueTriage.models import Action, Observation
+except ImportError:  # pragma: no cover
+    from models import Action, Observation
 
 
 class GithubissuetriageEnv(

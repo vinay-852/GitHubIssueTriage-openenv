@@ -43,3 +43,6 @@ server = "GitHubIssueTriage.server.app:main"
 include-package-data = true
 packages = ["GitHubIssueTriage", "GitHubIssueTriage.server"]
 package-dir = { "GitHubIssueTriage" = ".", "GitHubIssueTriage.server" = "server" }
+
+[tool.setuptools.package-data]
+GitHubIssueTriage = ["data/*.json"]

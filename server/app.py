@@ -36,7 +36,12 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 
-from . import Action , Observation, GitHubIssueTriageEnvironment
+try:
+    from GitHubIssueTriage.models import Action, Observation
+    from GitHubIssueTriage.server.GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
+except ImportError:  # pragma: no cover
+    from models import Action, Observation
+    from server.GitHubIssueTriage_environment import GitHubIssueTriageEnvironment
 
 
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import List
 
-from . import IssueTriageState, Observation
+try:
+    from GitHubIssueTriage.models import IssueTriageState, Observation
+except ImportError:  # pragma: no cover
+    from models import IssueTriageState, Observation
 
 
 def _available_labels(state: IssueTriageState) -> List[str]:

@@ -9,18 +9,42 @@ from typing import Dict, List, Optional, Union
 
 from openenv.core.env_server import Environment
 
-from .import (
-    Action,
-    Difficulty,
-    HistoryEntry,
-    Observation,
-    ResetResult,
-    State,
-    StatePayload,
-    StepInfo,
-    StepResult,
-)
-from . import ParsedActionResult, parse_and_validate_action,load_episode_bundle, load_episode_bundle_from_paths, build_observation, compute_reward, is_episode_done, apply_action_to_state
+try:
+    from GitHubIssueTriage.models import (
+        Action,
+        Difficulty,
+        HistoryEntry,
+        Observation,
+        ResetResult,
+        State,
+        StatePayload,
+        StepInfo,
+        StepResult,
+    )
+    from GitHubIssueTriage.server.actions import ParsedActionResult, parse_and_validate_action
+    from GitHubIssueTriage.server.loader import load_episode_bundle, load_episode_bundle_from_paths
+    from GitHubIssueTriage.server.observation import build_observation
+    from GitHubIssueTriage.server.reward import compute_reward
+    from GitHubIssueTriage.server.termination import is_episode_done
+    from GitHubIssueTriage.server.transitions import apply_action_to_state
+except ImportError:  # pragma: no cover
+    from models import (
+        Action,
+        Difficulty,
+        HistoryEntry,
+        Observation,
+        ResetResult,
+        State,
+        StatePayload,
+        StepInfo,
+        StepResult,
+    )
+    from server.actions import ParsedActionResult, parse_and_validate_action
+    from server.loader import load_episode_bundle, load_episode_bundle_from_paths
+    from server.observation import build_observation
+    from server.reward import compute_reward
+    from server.termination import is_episode_done
+    from server.transitions import apply_action_to_state
 
 
 class GitHubIssueTriageEnvironment(Environment):

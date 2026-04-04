@@ -6,7 +6,10 @@ from typing import Any, Dict, Iterable, Union
 
 from pydantic import TypeAdapter
 
-from . import Action, ActionType, validate_action_payload
+try:
+    from GitHubIssueTriage.models import Action, ActionType, validate_action_payload
+except ImportError:  # pragma: no cover
+    from models import Action, ActionType, validate_action_payload
 
 ACTION_ADAPTER = TypeAdapter(Action)
 

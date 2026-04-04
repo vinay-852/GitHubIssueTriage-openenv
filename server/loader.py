@@ -7,23 +7,42 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 from urllib.request import Request, urlopen
 
-from . import (
-    ActionType,
-    Difficulty,
-    DuplicateCandidate,
-    GoalType,
-    HiddenGradingTarget,
-    IssueComment,
-    IssueSnapshot,
-    IssueStatus,
-    IssueTriageState,
-    Priority,
-    RepoRules,
-    Severity,
-    TaskSpec,
-    TimelineEvent,
-    build_initial_state,
-)
+try:
+    from GitHubIssueTriage.models import (
+        ActionType,
+        Difficulty,
+        DuplicateCandidate,
+        GoalType,
+        HiddenGradingTarget,
+        IssueComment,
+        IssueSnapshot,
+        IssueStatus,
+        IssueTriageState,
+        Priority,
+        RepoRules,
+        Severity,
+        TaskSpec,
+        TimelineEvent,
+        build_initial_state,
+    )
+except ImportError:  # pragma: no cover
+    from models import (
+        ActionType,
+        Difficulty,
+        DuplicateCandidate,
+        GoalType,
+        HiddenGradingTarget,
+        IssueComment,
+        IssueSnapshot,
+        IssueStatus,
+        IssueTriageState,
+        Priority,
+        RepoRules,
+        Severity,
+        TaskSpec,
+        TimelineEvent,
+        build_initial_state,
+    )
 
 JsonLike = Dict[str, Any]
 
