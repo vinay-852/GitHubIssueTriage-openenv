@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -84,10 +84,34 @@ class IssueTriageAgent:
         print(f"Using model: {self.model_name}")
         print(f"Using API key: {'Yes' if self.api_key else 'No'}")
 
-        if not self.api_key:
-            raise RuntimeError("Missing OPENAI_API_KEY.")
+        self.client: Optional[OpenAI] = None
+        if self.api_key:
+            self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
+        else:
+            print("OPENAI_API_KEY is not set. Falling back to rule-based actions.")
 
-        self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
+    def _fallback_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
+        task = observation.get("task", {})
+        issue_id = task.get("issue_id")
+
+        history = observation.get("action_history", [])
+        history_types = {
+            (entry.get("action_type") or "").lower() for entry in history if isinstance(entry, dict)
+        }
+
+        if issue_id and ActionType.READ_ISSUE.value not in history_types:
+            return {"type": ActionType.READ_ISSUE.value, "issue_id": issue_id}
+
+        if ActionType.READ_REPO_RULES.value not in history_types:
+            return {"type": ActionType.READ_REPO_RULES.value}
+
+        pending_fields = observation.get("pending_missing_fields") or []
+        if pending_fields:
+            safe_fields = [f for f in pending_fields if isinstance(f, str) and f.strip()]
+            if safe_fields:
+                return {"type": ActionType.REQUEST_INFO.value, "fields": safe_fields}
+
+        return {"type": ActionType.NOOP.value}
 
     def _build_messages(self, observation: Dict[str, Any]) -> List[Dict[str, str]]:
         return [
@@ -167,6 +191,9 @@ class IssueTriageAgent:
         return action.model_dump(mode="json", exclude_none=True)
 
     def next_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
+        if self.client is None:
+            return self._fallback_action(observation)
+
         try:
             stream = self.client.chat.completions.create(
                 model=self.model_name,
@@ -189,4 +216,4 @@ class IssueTriageAgent:
 
         except Exception as e:
             print(f"Error occurred in next_action_streaming: {e}")
-            return {"type": ActionType.NOOP.value}
+            return self._fallback_action(observation)

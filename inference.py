@@ -271,6 +271,11 @@ def main() -> None:
         help=f"Path to tasks.json (default: {DEFAULT_TASKS}). If provided, runs all tasks.",
     )
     parser.add_argument(
+        "--issue-file",
+        default=str(DEFAULT_ISSUES),
+        help=f"Path to issues.json or single issue JSON file (default: {DEFAULT_ISSUES})",
+    )
+    parser.add_argument(
         "--issue-url",
         default=None,
         help="Optional GitHub issue URL. If provided, this overrides --issue-file.",
@@ -379,4 +384,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        # Keep the validator run alive and surface a machine-readable error.
+        print(
+            f"[FATAL] inference.py handled exception: {exc.__class__.__name__}: {exc}",
+            flush=True,
+        )
