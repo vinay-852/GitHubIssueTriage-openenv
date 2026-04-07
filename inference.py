@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List
 from urllib.parse import urlparse
+
+from openai import OpenAI
 
 from agent import IssueTriageAgent
 from models import ActionType
@@ -23,6 +27,14 @@ DATA_DIR = Path("data")
 DEFAULT_REPO_RULES = DATA_DIR / "repo_rules.json"
 DEFAULT_ISSUES = DATA_DIR / "issues.json"
 DEFAULT_TASKS = DATA_DIR / "tasks.json"
+
+# Required inference-time model wiring.
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Optional for OpenEnv.from_docker_image() based workflows.
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 
 def _structured_print(label: str, payload: Dict) -> None:
@@ -58,8 +70,8 @@ def _parse_github_issue_url(issue_url: str) -> tuple[str, str]:
 
 
 def _collect_provided_info(fields: List[str]) -> Dict[str, str]:
-    print("\nThe environment requested more information.")
-    print("Using default values for the fields.\n")
+    print("\nThe environment requested more information.", file=sys.stderr, flush=True)
+    print("Using default values for the fields.\n", file=sys.stderr, flush=True)
 
     # Default values for common fields
     defaults = {
@@ -76,7 +88,7 @@ def _collect_provided_info(fields: List[str]) -> Dict[str, str]:
     for field in fields:
         value = defaults.get(field, f"Default value for {field}")
         values[field] = value
-        print(f"{field}: {value}")
+        print(f"{field}: {value}", file=sys.stderr, flush=True)
     return values
 
 
@@ -157,17 +169,20 @@ def run_episode(env, agent: IssueTriageAgent) -> Dict[str, float]:
     while True:
         action = agent.next_action(observation.model_dump())
 
-        _structured_print("DEBUG_ACTION", action)
-
         try:
             step_result = env.step(action)
         except RuntimeError as e:
             error_msg = str(e)
-            print(f"[ERROR] Environment step failed: {error_msg}", flush=True)
-            print(f"[ERROR] Action was: {json.dumps(action, sort_keys=True)}", flush=True)
+            print(f"[ERROR] Environment step failed: {error_msg}", file=sys.stderr, flush=True)
+            print(
+                f"[ERROR] Action was: {json.dumps(action, sort_keys=True)}",
+                file=sys.stderr,
+                flush=True,
+            )
             print(
                 f"[ERROR] Observation state: "
                 f"episode_id={observation.episode_id}, step={step_index}",
+                file=sys.stderr,
                 flush=True,
             )
             raise
@@ -205,10 +220,12 @@ def run_episode(env, agent: IssueTriageAgent) -> Dict[str, float]:
                     error_msg = str(e)
                     print(
                         f"[ERROR] Environment step failed on PROVIDE_INFO: {error_msg}",
+                        file=sys.stderr,
                         flush=True,
                     )
                     print(
                         f"[ERROR] Action was: {json.dumps(provide_action, sort_keys=True)}",
+                        file=sys.stderr,
                         flush=True,
                     )
                     raise
@@ -341,7 +358,13 @@ def main() -> None:
         )
         episodes = [episode]
 
-    agent = IssueTriageAgent()
+    model_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN) if HF_TOKEN else None
+    agent = IssueTriageAgent(
+        client=model_client,
+        model_name=MODEL_NAME,
+        api_base_url=API_BASE_URL,
+        api_key=HF_TOKEN,
+    )
 
     if args.transport == "local":
         env = GitHubIssueTriageEnvironment(
@@ -363,11 +386,19 @@ def main() -> None:
             })
         
         # Print table after all runs
-        print(f"Model: {agent.model_name}, Base URL: {agent.api_base_url}, Temp: {agent.temperature}, Max Tokens: {agent.max_tokens}")
-        print("Episode | Task ID              | Difficulty | Score  | Steps")
-        print("--------|-----------------------|------------|--------|------")
+        print(
+            f"Model: {agent.model_name}, Base URL: {agent.api_base_url}, Temp: {agent.temperature}, Max Tokens: {agent.max_tokens}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print("Episode | Task ID              | Difficulty | Score  | Steps", file=sys.stderr, flush=True)
+        print("--------|-----------------------|------------|--------|------", file=sys.stderr, flush=True)
         for r in results:
-            print(f"{r['episode']:7} | {r['task_id'][:21]:21} | {r['difficulty']:10} | {r['score']:.3f} | {int(r['steps']):5}")
+            print(
+                f"{r['episode']:7} | {r['task_id'][:21]:21} | {r['difficulty']:10} | {r['score']:.3f} | {int(r['steps']):5}",
+                file=sys.stderr,
+                flush=True,
+            )
         return
 
     if GithubissuetriageEnv is None:
@@ -380,7 +411,7 @@ def main() -> None:
         live_github=args.live_github,
     ).sync() as client:
         env = EpisodeEnv(client)
-        print(run_episode(env, agent))
+        print(run_episode(env, agent), file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
@@ -390,5 +421,6 @@ if __name__ == "__main__":
         # Keep the validator run alive and surface a machine-readable error.
         print(
             f"[FATAL] inference.py handled exception: {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
             flush=True,
         )

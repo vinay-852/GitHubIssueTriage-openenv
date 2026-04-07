@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -73,22 +74,32 @@ Context rules:
 
 
 class IssueTriageAgent:
-    def __init__(self) -> None:
-        self.api_base_url = BASE_URL
-        self.api_key = API_KEY
-        self.model_name = os.getenv("MODEL_NAME", "oca/gpt-5")
+    def __init__(
+        self,
+        client: Optional[OpenAI] = None,
+        model_name: Optional[str] = None,
+        api_base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> None:
+        self.api_base_url = api_base_url if api_base_url is not None else BASE_URL
+        self.api_key = api_key if api_key is not None else API_KEY
+        self.model_name = model_name or os.getenv("MODEL_NAME", "oca/gpt-5")
         self.temperature = float(os.getenv("TEMPERATURE", "0.2"))
         self.max_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "200"))
 
-        print(f"Using API base URL: {self.api_base_url}")
-        print(f"Using model: {self.model_name}")
-        print(f"Using API key: {'Yes' if self.api_key else 'No'}")
+        print(f"Using API base URL: {self.api_base_url}", file=sys.stderr, flush=True)
+        print(f"Using model: {self.model_name}", file=sys.stderr, flush=True)
+        print(f"Using API key: {'Yes' if self.api_key else 'No'}", file=sys.stderr, flush=True)
 
-        self.client: Optional[OpenAI] = None
-        if self.api_key:
+        self.client: Optional[OpenAI] = client
+        if self.client is None and self.api_key:
             self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
-        else:
-            print("OPENAI_API_KEY is not set. Falling back to rule-based actions.")
+        elif self.client is None:
+            print(
+                "HF_TOKEN/OPENAI_API_KEY is not set. Falling back to rule-based actions.",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _fallback_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
         task = observation.get("task", {})
@@ -210,10 +221,10 @@ class IssueTriageAgent:
                     parts.append(delta)
 
             raw_text = "".join(parts).strip()
-            print(f"[Debug] LLM Raw Stream Output: {raw_text}")
+            print(f"[Debug] LLM Raw Stream Output: {raw_text}", file=sys.stderr, flush=True)
 
             return self._parse_action_json(raw_text)
 
         except Exception as e:
-            print(f"Error occurred in next_action_streaming: {e}")
+            print(f"Error occurred in next_action_streaming: {e}", file=sys.stderr, flush=True)
             return self._fallback_action(observation)
