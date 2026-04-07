@@ -83,6 +83,13 @@ docker build -t github-issue-triage-env -f server/Dockerfile .
 docker run --rm -p 8000:8000 github-issue-triage-env
 ```
 
+Or with the default root Dockerfile:
+
+```bash
+docker build -t github-issue-triage-env .
+docker run --rm -p 8000:8000 github-issue-triage-env
+```
+
 ---
 
 ## ⚙️ Configuration
@@ -91,13 +98,14 @@ Create a `.env` file in the root directory:
 
 ```dotenv
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY
-API_BASE_URL=https://api.groq.com/openai/v1
-MODEL_NAME=llama-3.3-70b-versatile
-TEMPERATURE=0.8
+HF_TOKEN=YOUR_HF_OR_PROVIDER_TOKEN
+API_BASE_URL=https://api.openai.com/v1
+MODEL_NAME=openai/gpt-oss-120b
+TEMPERATURE=0.0
 MAX_OUTPUT_TOKENS=200
 ```
 
-These values are automatically loaded using `dotenv` when `agent.py` runs.
+`inference.py` reads `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` (and also supports `OPENAI_API_KEY`).
 
 ---
 
@@ -115,6 +123,7 @@ python inference.py
 - Difficulty  
 - Score  
 - Steps  
+- Structured logs on stdout with strict `[START]`, `[STEP]`, and `[END]` entries
 
 ---
 
@@ -125,9 +134,8 @@ python inference.py
 - `--issue-file` → Single issue fallback  
 - `--issue-url` → Load GitHub issue directly  
 - `--live-github` → Fetch live data  
-- `--transport` → local or remote  
-- `--base-url` → Remote environment URL  
-- `--max-steps` → Override step limit  
+- `--task-id` → Override generated task id for single-issue mode  
+- `--max-steps` → Override step limit for single-issue mode  
 
 ---
 
@@ -135,12 +143,12 @@ python inference.py
 
 Run all tasks:
 ```bash
-python inference.py --transport local
+python inference.py
 ```
 
 Run a single issue:
 ```bash
-python inference.py --issue-url https://github.com/OWNER/REPO/issues/123 --transport local
+python inference.py --issue-url https://github.com/OWNER/REPO/issues/123
 ```
 
 Use a custom tasks file:
@@ -154,9 +162,9 @@ python inference.py --tasks-file data/tasks.json
 
 | Task ID              | Difficulty | Score | Steps |
 |----------------------|------------|--------|-------|
-| triage_easy_api_p1   | easy       | 0.488  | 8     |
-| needs_info_sso       | medium     | 0.717  | 10    |
-| duplicate_ui_crash   | hard       | 0.688  | 10    |
+| triage_easy_api_p1   | easy       | 0.938  | 6     |
+| needs_info_sso       | medium     | 0.975  | 5     |
+| duplicate_ui_crash   | hard       | 0.972  | 6     |
 
 Use these values to compare performance across models or configurations.
 

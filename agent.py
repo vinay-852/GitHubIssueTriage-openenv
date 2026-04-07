@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -83,44 +82,141 @@ class IssueTriageAgent:
     ) -> None:
         self.api_base_url = api_base_url if api_base_url is not None else BASE_URL
         self.api_key = api_key if api_key is not None else API_KEY
-        self.model_name = model_name or os.getenv("MODEL_NAME", "oca/gpt-5")
-        self.temperature = float(os.getenv("TEMPERATURE", "0.2"))
+        self.model_name = model_name or os.getenv("MODEL_NAME", "openai/gpt-oss-120b")
+        self.temperature = float(os.getenv("TEMPERATURE", "0.0"))
         self.max_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "200"))
-
-        print(f"Using API base URL: {self.api_base_url}", file=sys.stderr, flush=True)
-        print(f"Using model: {self.model_name}", file=sys.stderr, flush=True)
-        print(f"Using API key: {'Yes' if self.api_key else 'No'}", file=sys.stderr, flush=True)
 
         self.client: Optional[OpenAI] = client
         if self.client is None and self.api_key:
             self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
-        elif self.client is None:
-            print(
-                "HF_TOKEN/OPENAI_API_KEY is not set. Falling back to rule-based actions.",
-                file=sys.stderr,
-                flush=True,
-            )
 
     def _fallback_action(self, observation: Dict[str, Any]) -> Dict[str, Any]:
-        task = observation.get("task", {})
+        task = observation.get("task", {}) or {}
+        issue = observation.get("issue", {}) or {}
+        repo_rules = observation.get("repo_rules", {}) or {}
         issue_id = task.get("issue_id")
+        allowed_actions = set(task.get("allowed_actions") or [])
 
-        history = observation.get("action_history", [])
-        history_types = {
-            (entry.get("action_type") or "").lower() for entry in history if isinstance(entry, dict)
-        }
+        history = observation.get("action_history", []) or []
+        history_types = set()
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            raw_type = entry.get("action_type")
+            if hasattr(raw_type, "value"):
+                normalized = str(raw_type.value).strip().lower()
+            else:
+                normalized = str(raw_type or "").strip().lower()
+                if normalized.startswith("actiontype."):
+                    normalized = normalized.split(".", 1)[1]
+            if normalized:
+                history_types.add(normalized)
 
-        if issue_id and ActionType.READ_ISSUE.value not in history_types:
+        if (
+            issue_id
+            and ActionType.READ_ISSUE.value in allowed_actions
+            and ActionType.READ_ISSUE.value not in history_types
+        ):
             return {"type": ActionType.READ_ISSUE.value, "issue_id": issue_id}
 
-        if ActionType.READ_REPO_RULES.value not in history_types:
+        if (
+            ActionType.READ_REPO_RULES.value in allowed_actions
+            and ActionType.READ_REPO_RULES.value not in history_types
+        ):
             return {"type": ActionType.READ_REPO_RULES.value}
 
         pending_fields = observation.get("pending_missing_fields") or []
-        if pending_fields:
+        if (
+            ActionType.REQUEST_INFO.value in allowed_actions
+            and pending_fields
+            and ActionType.REQUEST_INFO.value not in history_types
+        ):
             safe_fields = [f for f in pending_fields if isinstance(f, str) and f.strip()]
             if safe_fields:
                 return {"type": ActionType.REQUEST_INFO.value, "fields": safe_fields}
+
+        if ActionType.ADD_LABEL.value in allowed_actions:
+            labels = set(issue.get("labels") or [])
+            objective_summary = observation.get("objective_summary") or []
+            for line in objective_summary:
+                if not isinstance(line, str) or not line.startswith("Labels needed:"):
+                    continue
+                needed = [x.strip() for x in line.split(":", 1)[1].split(",") if x.strip()]
+                for label in needed:
+                    if label not in labels:
+                        return {"type": ActionType.ADD_LABEL.value, "label": label}
+
+        if ActionType.ASSIGN_USER.value in allowed_actions and not (issue.get("assignees") or []):
+            component = str(issue.get("component") or "").strip()
+            routing = repo_rules.get("routing_rules", {}) or {}
+            if component in routing and isinstance(routing[component], list):
+                for candidate in routing[component]:
+                    if isinstance(candidate, str) and candidate.strip():
+                        return {"type": ActionType.ASSIGN_USER.value, "username": candidate.strip()}
+            pool = repo_rules.get("assignee_pool", []) or []
+            for candidate in pool:
+                if isinstance(candidate, str) and candidate.strip():
+                    return {"type": ActionType.ASSIGN_USER.value, "username": candidate.strip()}
+
+        if ActionType.MARK_DUPLICATE.value in allowed_actions and not (issue.get("linked_duplicates") or []):
+            candidates = observation.get("candidate_duplicates") or []
+            best = None
+            best_score = -1.0
+            for cand in candidates:
+                if not isinstance(cand, dict):
+                    continue
+                score = float(cand.get("similarity_score") or 0.0)
+                issue_ref = cand.get("issue_id")
+                if isinstance(issue_ref, str) and score > best_score:
+                    best_score = score
+                    best = issue_ref
+            if best:
+                return {"type": ActionType.MARK_DUPLICATE.value, "issue_id": best}
+
+        if (
+            ActionType.CLOSE_ISSUE.value in allowed_actions
+            and str(issue.get("status") or "").lower() == "open"
+            and (issue.get("linked_duplicates") or [])
+        ):
+            return {"type": ActionType.CLOSE_ISSUE.value, "reason": "duplicate"}
+
+        if ActionType.COMMENT.value in allowed_actions:
+            comments = issue.get("comments") or []
+            if not comments:
+                return {"type": ActionType.COMMENT.value, "text": "triaged and policy checks applied"}
+
+        if ActionType.NOOP.value in allowed_actions:
+            return {"type": ActionType.NOOP.value}
+
+        if ActionType.READ_LABEL_DEFINITIONS.value in allowed_actions:
+            return {"type": ActionType.READ_LABEL_DEFINITIONS.value}
+        if ActionType.READ_MILESTONES.value in allowed_actions:
+            return {"type": ActionType.READ_MILESTONES.value}
+        if ActionType.READ_TEAM_ROUTING.value in allowed_actions:
+            return {"type": ActionType.READ_TEAM_ROUTING.value}
+
+        if allowed_actions:
+            first = sorted(allowed_actions)[0]
+            payload: Dict[str, Any] = {"type": first}
+            if first == ActionType.READ_ISSUE.value and issue_id:
+                payload["issue_id"] = issue_id
+            elif first == ActionType.ADD_LABEL.value:
+                payload["label"] = "type:bug"
+            elif first == ActionType.ASSIGN_USER.value:
+                payload["username"] = "devon"
+            elif first == ActionType.SET_PRIORITY.value:
+                payload["priority"] = "p2"
+            elif first == ActionType.SET_MILESTONE.value:
+                payload["milestone"] = "backlog"
+            elif first == ActionType.COMMENT.value:
+                payload["text"] = "triage update"
+            elif first == ActionType.REQUEST_INFO.value:
+                payload["fields"] = ["steps_to_reproduce"]
+            elif first == ActionType.MARK_DUPLICATE.value:
+                payload["issue_id"] = "issue_099"
+            elif first == ActionType.CLOSE_ISSUE.value:
+                payload["reason"] = "duplicate"
+            return payload
 
         return {"type": ActionType.NOOP.value}
 
@@ -221,10 +317,7 @@ class IssueTriageAgent:
                     parts.append(delta)
 
             raw_text = "".join(parts).strip()
-            print(f"[Debug] LLM Raw Stream Output: {raw_text}", file=sys.stderr, flush=True)
-
             return self._parse_action_json(raw_text)
 
         except Exception as e:
-            print(f"Error occurred in next_action_streaming: {e}", file=sys.stderr, flush=True)
             return self._fallback_action(observation)

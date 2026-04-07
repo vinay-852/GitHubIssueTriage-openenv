@@ -5,3 +5,4 @@ openenv-course/
 __pycache__
 xyz
 .v
+*.egg-info/

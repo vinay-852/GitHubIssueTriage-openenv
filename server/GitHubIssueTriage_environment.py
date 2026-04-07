@@ -239,9 +239,11 @@ class GitHubIssueTriageEnvironment(Environment):
         Returns:
             StepResult with observation, reward, done, and info
         """
+        if self._state is None:
+            # Some validators call /step without an explicit prior reset in the same session.
+            # Auto-reset to keep the environment resilient and stateless-call friendly.
+            self.reset()
         state = self._require_state()
-        
-        print(f"[STEP_CALLED] action type: {type(action)}, action: {action}", flush=True)
 
         if state.done:
             obs = build_observation(state)
@@ -280,12 +282,7 @@ class GitHubIssueTriageEnvironment(Environment):
                 action, state.task.allowed_actions
             )
         except Exception as e:
-            import traceback
-
-            error_trace = traceback.format_exc()
             error_msg = f"Action parsing failed: {str(e)}"
-            print(f"[SERVER ERROR] {error_msg}", flush=True)
-            print(f"[SERVER TRACEBACK] {error_trace}", flush=True)
             raise ValueError(error_msg) from e
 
         parsed_action = validation.action
@@ -394,6 +391,9 @@ class GitHubIssueTriageEnvironment(Environment):
 
     @property
     def state(self) -> State:
+        if self._state is None:
+            # Keep /state functional even if reset wasn't called in this process/session.
+            self.reset()
         return self._require_state().model_copy(deep=True)
 
     def snapshot(self) -> StatePayload:
