@@ -4,5 +4,5 @@ openenv-course/
 .trial.py
 __pycache__
 xyz
-.v
+.v*
 *.egg-info/

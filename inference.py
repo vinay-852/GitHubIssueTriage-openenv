@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,7 +27,8 @@ API_KEY = OPENAI_API_KEY or HF_TOKEN
 
 BENCHMARK = "GitHubIssueTriage"
 SUCCESS_SCORE_THRESHOLD = 0.80
-SCORE_EPSILON = 1e-6
+# Keep a visible margin away from 0 and 1 to survive downstream rounding.
+SCORE_EPSILON = 1e-3
 
 
 def _emit(tag: str, payload: Dict[str, Any]) -> None:
@@ -43,7 +45,7 @@ def log_step(step: int, action: Dict[str, Any], reward: float, done: bool, error
         {
             "step": int(step),
             "action": action,
-            "reward": float(reward),
+            "reward": float(_strict_open01(reward)),
             "done": bool(done),
             "error": error,
         },
@@ -56,15 +58,27 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
         {
             "success": bool(success),
             "steps": int(steps),
-            "score": float(score),
-            "rewards": [float(r) for r in rewards],
+            "score": float(_strict_open01(score)),
+            "rewards": [float(_strict_open01(r)) for r in rewards],
         },
     )
 
 
 def _strict_open01(value: float, epsilon: float = SCORE_EPSILON) -> float:
-    bounded = max(0.0, min(1.0, float(value)))
-    eps = max(1e-9, min(0.49, float(epsilon)))
+    try:
+        bounded = max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        bounded = 0.5
+    if not math.isfinite(bounded):
+        bounded = 0.5
+
+    try:
+        eps = max(1e-6, min(0.49, float(epsilon)))
+    except (TypeError, ValueError):
+        eps = SCORE_EPSILON
+    if not math.isfinite(eps):
+        eps = SCORE_EPSILON
+
     if bounded <= 0.0:
         return eps
     if bounded >= 1.0:
@@ -126,7 +140,7 @@ def run_episode(env: GitHubIssueTriageEnvironment, agent: IssueTriageAgent, task
 
         try:
             step_result = env.step(action)
-            reward = float(step_result.reward.total)
+            reward = _strict_open01(float(step_result.reward.total))
             done = bool(step_result.done)
             error = None
 
@@ -141,7 +155,7 @@ def run_episode(env: GitHubIssueTriageEnvironment, agent: IssueTriageAgent, task
 
         except Exception as exc:  # pragma: no cover
             error = f"{exc.__class__.__name__}: {exc}"
-            log_step(step=step, action=action, reward=0.0, done=True, error=error)
+            log_step(step=step, action=action, reward=SCORE_EPSILON, done=True, error=error)
             steps_taken = step
             break
 
