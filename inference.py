@@ -26,6 +26,7 @@ API_KEY = OPENAI_API_KEY or HF_TOKEN
 
 BENCHMARK = "GitHubIssueTriage"
 SUCCESS_SCORE_THRESHOLD = 0.80
+SCORE_EPSILON = 1e-6
 
 
 def _emit(tag: str, payload: Dict[str, Any]) -> None:
@@ -61,8 +62,14 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     )
 
 
-def _clamp01(value: float) -> float:
-    return max(0.0, min(1.0, float(value)))
+def _strict_open01(value: float, epsilon: float = SCORE_EPSILON) -> float:
+    bounded = max(0.0, min(1.0, float(value)))
+    eps = max(1e-9, min(0.49, float(epsilon)))
+    if bounded <= 0.0:
+        return eps
+    if bounded >= 1.0:
+        return 1.0 - eps
+    return bounded
 
 
 def _load_episodes(args: argparse.Namespace):
@@ -139,7 +146,9 @@ def run_episode(env: GitHubIssueTriageEnvironment, agent: IssueTriageAgent, task
             break
 
     grade = grade_episode(env.state)
-    score = _clamp01(float(grade.score))
+    score = _strict_open01(float(grade.score))
+    if not (0.0 < score < 1.0):
+        raise RuntimeError(f"Task score out of strict range (0,1): {score!r}")
     success = score >= SUCCESS_SCORE_THRESHOLD
 
     log_end(success=success, steps=steps_taken, score=score, rewards=rewards)

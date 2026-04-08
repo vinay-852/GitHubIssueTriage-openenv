@@ -597,7 +597,7 @@ class GraderResult(BaseModel):
 
     SCORE_EPSILON: ClassVar[float] = 1e-3
 
-    score: float = Field(ge=0.0, le=1.0)
+    score: float = Field(gt=0.0, lt=1.0)
     matched_labels: List[str] = Field(default_factory=list)
     matched_assignee: bool = False
     matched_priority: bool = False
